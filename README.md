@@ -11,7 +11,7 @@
 
 ## Публикация
 
-Это Cloudflare Worker. Конфигурация `wrangler.toml` задаёт имя `map` и Custom Domain `map.indexmod.press`. GitHub Actions при публикации создаёт или находит отдельное KV-пространство `map-MAP_DB`, подставляет его ID в конфигурацию и запускает `wrangler deploy`. При наличии зоны `indexmod.press` в аккаунте Cloudflare Wrangler также привязывает домен.
+Это Cloudflare Worker. Конфигурация `wrangler.toml` задаёт имя `map` и Custom Domain `map.indexmod.press`. GitHub Actions при публикации создаёт или находит отдельное KV-пространство `MAP_DB`, подставляет его ID в конфигурацию и запускает `wrangler deploy`. При наличии зоны `indexmod.press` в аккаунте Cloudflare Wrangler также привязывает домен.
 
 Для запуска workflow нужен секрет `CLOUDFLARE_API_TOKEN` с правами на Workers, Workers KV и маршруты зоны. Секреты других личных репозиториев GitHub автоматически не передаются в новый репозиторий. Данные `moscow` не используются.
 

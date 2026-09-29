@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 
-const title = 'map-MAP_DB';
+const title = 'MAP_DB';
 const wrangler = (...args) => execFileSync('./node_modules/.bin/wrangler', args, {
   encoding: 'utf8',
   stdio: ['ignore', 'pipe', 'inherit'],
@@ -15,7 +15,7 @@ const namespaces = () => {
 
 let namespace = namespaces().find(item => item.title === title);
 if (!namespace) {
-  wrangler('kv', 'namespace', 'create', 'MAP_DB');
+  wrangler('kv', 'namespace', 'create', title, '--binding', 'MAP_DB', '--update-config=false');
   namespace = namespaces().find(item => item.title === title);
 }
 if (!namespace?.id || !/^[a-f0-9]{32}$/i.test(namespace.id)) {
@@ -24,7 +24,7 @@ if (!namespace?.id || !/^[a-f0-9]{32}$/i.test(namespace.id)) {
 
 const path = 'wrangler.toml';
 const config = readFileSync(path, 'utf8');
-const binding = '[[kv_namespaces]]\nbinding = "MAP_DB"';
-if (!config.includes(binding)) throw new Error('Missing MAP_DB binding in wrangler.toml');
-writeFileSync(path, config.replace(binding, `${binding}\nid = "${namespace.id}"`));
+const binding = /(\[\[kv_namespaces\]\]\r?\nbinding = "MAP_DB")(?:\r?\nid = "[^"]*")?/;
+if (!binding.test(config)) throw new Error('Missing MAP_DB binding in wrangler.toml');
+writeFileSync(path, config.replace(binding, `$1\nid = "${namespace.id}"`));
 console.log(`Using dedicated KV namespace ${title}`);
