@@ -1,0 +1,10 @@
+name = "map"
+main = "worker/index.js"
+compatibility_date = "2026-06-27"
+
+[[kv_namespaces]]
+binding = "MAP_DB"
+
+[[routes]]
+pattern = "map.indexmod.press"
+custom_domain = true
