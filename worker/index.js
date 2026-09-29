@@ -89,7 +89,10 @@ const html = `<!doctype html>
 <style>
 :root{
   color-scheme:light;
-  --dot-size:clamp(12px,1.15vw,18px);
+  --dot-size:36px;
+  --hit-size:52px;
+  --label-gap:22px;
+  --label-width:min(42vw,420px);
   --label-size:16px;
 }
 
@@ -150,15 +153,25 @@ body{
   left:0;
   top:0;
   flex:0 0 auto;
+  width:var(--hit-size);
+  height:var(--hit-size);
+  border-radius:50%;
+  cursor:grab;
+  touch-action:none;
+  transform:translate(-50%,-50%);
+}
+
+.dot::before{
+  content:"";
+  position:absolute;
+  left:50%;
+  top:50%;
   width:var(--dot-size);
   height:var(--dot-size);
   border-radius:50%;
-  border:1px solid #111;
-  background:#fff;
-  cursor:grab;
-  touch-action:none;
-  box-shadow:0 0 0 1px #fff,0 0 12px currentColor;
+  background:currentColor;
   transform:translate(-50%,-50%);
+  pointer-events:none;
 }
 
 .node.dragging{
@@ -167,60 +180,30 @@ body{
 
 .node.dragging .dot{
   cursor:grabbing;
-  transform:scale(1.28);
 }
 
 .title{
   min-width:0;
-  overflow:hidden;
   color:#000;
   text-decoration:none;
-  text-overflow:ellipsis;
-  white-space:nowrap;
   font-size:var(--label-size);
   line-height:1.45;
-  text-shadow:0 1px 0 #fff,1px 0 0 #fff,-1px 0 0 #fff;
+  overflow-wrap:anywhere;
 }
 
 .label{
   position:absolute;
   display:flex;
   align-items:center;
-  gap:8px;
+  gap:12px;
   width:max-content;
-  max-width:min(58vw,480px);
+  max-width:var(--label-width);
 }
 
 .label a{
   display:block;
-  width:max-content;
-  max-width:calc(min(58vw,480px) - 28px);
-  white-space:nowrap;
-}
-
-.side-right .label{
-  left:calc(var(--dot-size)/2 + 10px);
-  top:0;
-  transform:translateY(-50%);
-}
-
-.side-left .label{
-  right:calc(var(--dot-size)/2 + 10px);
-  top:0;
-  flex-direction:row-reverse;
-  transform:translateY(-50%);
-}
-
-.side-top .label{
-  left:0;
-  bottom:calc(var(--dot-size)/2 + 10px);
-  transform:translateX(-50%);
-}
-
-.side-bottom .label{
-  left:0;
-  top:calc(var(--dot-size)/2 + 10px);
-  transform:translateX(-50%);
+  flex:1;
+  white-space:normal;
 }
 
 .del{
@@ -229,8 +212,11 @@ body{
   cursor:pointer;
   opacity:.35;
   font-size:clamp(12px,1.15vw,16px);
+  display:grid;
+  place-items:center;
+  width:32px;
+  min-height:32px;
   line-height:1;
-  padding:8px 2px;
 }
 
 .del:hover,
@@ -238,35 +224,32 @@ body{
   opacity:1;
 }
 
-@media (max-width:600px){
+@media (max-width:600px), (pointer:coarse){
   :root{
-    --dot-size:34px;
+    --dot-size:48px;
+    --hit-size:64px;
+    --label-gap:24px;
     --label-size:clamp(17px,4.8vw,20px);
-  }
-
-  .dot{
-    box-shadow:0 0 0 6px rgba(0,0,0,.07),0 0 12px currentColor;
   }
 
   .label{
     align-items:flex-start;
-    gap:7px;
-    max-width:min(72vw,320px);
   }
 
   .label a{
-    max-width:calc(min(72vw,320px) - 40px);
-    white-space:normal;
     line-height:1.3;
   }
 
-  .side-left .label{
-    align-items:flex-start;
-  }
-
   .del{
-    padding:3px 5px;
+    width:40px;
+    min-height:40px;
     font-size:16px;
+  }
+}
+
+@media (max-width:600px){
+  :root{
+    --label-width:min(70vw,280px);
   }
 }
 </style>
@@ -352,8 +335,7 @@ document.addEventListener("paste", async (e) => {
       id: crypto.randomUUID(),
       title: meta.title || "Untitled",
       link: text,
-      nx: 0.5,
-      ny: 0.5
+      ...newNodePosition()
     });
 
     ws.appendChild(node.el);
@@ -395,13 +377,16 @@ function createNode(d){
   el.appendChild(label);
 
   const position = normalizedPosition(d);
+  const anchor = { x:0, y:0 };
 
   function render(){
-    el.style.left = (position.x*innerWidth)+"px";
-    el.style.top = (position.y*innerHeight)+"px";
+    const margin = dotMetrics().hitSize/2+12;
+    anchor.x = clamp(position.x*innerWidth,margin,innerWidth-margin);
+    anchor.y = clamp(position.y*innerHeight,margin,innerHeight-margin);
+    el.style.left = anchor.x+"px";
+    el.style.top = anchor.y+"px";
 
     const color = colorAt(position.x,position.y);
-    dot.style.backgroundColor = color;
     dot.style.color = color;
   }
 
@@ -409,18 +394,13 @@ function createNode(d){
     position.x = clamp((clientX-offsetX)/innerWidth,0.015,0.985);
     position.y = clamp((clientY-offsetY)/innerHeight,0.025,0.975);
     render();
+    scheduleLabelLayout();
   }
-
-  function setSide(side){
-    el.classList.remove("side-right","side-left","side-top","side-bottom");
-    el.classList.add("side-"+side);
-  }
-
-  setSide(position.x>0.62 ? "left" : "right");
 
   del.onclick = () => {
     el.remove();
     nodes = nodes.filter(n => n.id !== d.id);
+    scheduleLabelLayout();
     save();
   };
 
@@ -429,10 +409,11 @@ function createNode(d){
   let offsetY = 0;
 
   dot.addEventListener("pointerdown",e=>{
+    if(e.button!==0) return;
     e.preventDefault();
     drag = true;
-    offsetX = e.clientX-position.x*innerWidth;
-    offsetY = e.clientY-position.y*innerHeight;
+    offsetX = e.clientX-anchor.x;
+    offsetY = e.clientY-anchor.y;
     el.classList.add("dragging");
     dot.setPointerCapture(e.pointerId);
   });
@@ -463,8 +444,8 @@ function createNode(d){
     el,
     label,
     position,
+    anchor,
     render,
-    setSide,
     get:()=>({
       id:d.id,
       title:d.title,
@@ -473,6 +454,35 @@ function createNode(d){
       ny:Number(position.y.toFixed(6))
     })
   };
+}
+
+function dotMetrics(){
+  const style = getComputedStyle(document.documentElement);
+  return {
+    size:parseFloat(style.getPropertyValue("--dot-size")),
+    hitSize:parseFloat(style.getPropertyValue("--hit-size")),
+    gap:parseFloat(style.getPropertyValue("--label-gap"))
+  };
+}
+
+function newNodePosition(){
+  const {hitSize} = dotMetrics();
+  const spacing = hitSize+20;
+  const margin = hitSize/2+12;
+  let best = { x:innerWidth/2, y:innerHeight/2, distance:-1 };
+  for(let ring=0;ring<=Math.ceil(Math.hypot(innerWidth,innerHeight)/spacing);ring++){
+    const count = Math.max(1,ring*8);
+    for(let step=0;step<count;step++){
+      const angle = step/count*Math.PI*2;
+      const x = innerWidth/2+Math.cos(angle)*ring*spacing;
+      const y = innerHeight/2+Math.sin(angle)*ring*spacing;
+      if(x<margin || x>innerWidth-margin || y<margin || y>innerHeight-margin) continue;
+      const distance = Math.min(...nodes.map(node=>Math.hypot(x-node.anchor.x,y-node.anchor.y)));
+      if(distance>=spacing) return { nx:x/innerWidth, ny:y/innerHeight };
+      if(distance>best.distance) best = {x,y,distance};
+    }
+  }
+  return { nx:best.x/innerWidth, ny:best.y/innerHeight };
 }
 
 function overlapArea(a,b){
@@ -489,46 +499,64 @@ function scheduleLabelLayout(){
 }
 
 function layoutLabels(){
-  if(!matchMedia("(max-width: 600px)").matches){
-    for(const node of nodes) node.setSide(node.position.x>0.62 ? "left" : "right");
-    return;
-  }
-
+  const {size,hitSize,gap} = dotMetrics();
+  const margin = 12;
+  const separation = 16;
   const placedLabels = [];
-  const dots = nodes.map(node=>({node,rect:node.el.querySelector(".dot").getBoundingClientRect()}));
+  const dots = nodes.map(node=>({
+    left:node.anchor.x-hitSize/2-6,
+    right:node.anchor.x+hitSize/2+6,
+    top:node.anchor.y-hitSize/2-6,
+    bottom:node.anchor.y+hitSize/2+6
+  }));
   const ordered = [...nodes].sort((a,b)=>a.position.y-b.position.y || a.position.x-b.position.x);
-  const sides = ["right","left","bottom","top"];
-  const gapPenalty = 42;
+  const labelSizes = new Map(nodes.map(node=>[node,{
+    width:node.label.offsetWidth,
+    height:node.label.offsetHeight
+  }]));
 
   for(const node of ordered){
-    let bestSide = sides[0];
+    const {width,height} = labelSizes.get(node);
+    const {x,y} = node.anchor;
+    const radius = size/2+gap;
+    const ownDot = {left:x-radius,right:x+radius,top:y-radius,bottom:y+radius};
+    const obstacles = [...dots,ownDot,...placedLabels];
+    const xs = [x+radius,x-radius-width,x-width/2,margin,innerWidth-margin-width];
+    const ys = [y-height/2,y+radius,y-radius-height,margin,innerHeight-margin-height];
+    for(const obstacle of obstacles){
+      xs.push(obstacle.left-width,obstacle.right);
+      ys.push(obstacle.top-height,obstacle.bottom);
+    }
+    const positions = (values,min,max,center,length) => [...new Set(values.map(value=>clamp(value,min,Math.max(min,max))))]
+      .sort((a,b)=>Math.abs(a+length/2-center)-Math.abs(b+length/2-center))
+      .slice(0,24);
+    const xPositions = positions(xs,margin,innerWidth-margin-width,x,width);
+    const yPositions = positions(ys,margin,innerHeight-margin-height,y,height);
+    let bestRect;
     let bestScore = Infinity;
 
-    for(let index=0;index<sides.length;index++){
-      const side = sides[index];
-      node.setSide(side);
-      const rect = node.label.getBoundingClientRect();
-      const outsideWidth = Math.max(0,-rect.left)+Math.max(0,rect.right-innerWidth);
-      const outsideHeight = Math.max(0,-rect.top)+Math.max(0,rect.bottom-innerHeight);
-      let score = (outsideWidth*rect.height + outsideHeight*rect.width)*30 + index*gapPenalty;
-
-      for(const previous of placedLabels){
-        score += overlapArea(rect,previous)*40;
-      }
-
-      for(const item of dots){
-        if(item.node===node) continue;
-        score += overlapArea(rect,item.rect)*60;
-      }
-
-      if(score<bestScore){
-        bestScore=score;
-        bestSide=side;
+    for(const left of xPositions){
+      for(const top of yPositions){
+        const rect = {left,top,right:left+width,bottom:top+height};
+        const overlap = obstacles.reduce((sum,obstacle)=>sum+overlapArea(rect,obstacle),0);
+        const distance = Math.hypot(clamp(x,rect.left,rect.right)-x,clamp(y,rect.top,rect.bottom)-y);
+        const alignment = Math.abs(top+height/2-y)*0.1+(left<x ? 0.5 : 0);
+        const score = overlap*10000+distance+alignment;
+        if(score<bestScore){
+          bestScore=score;
+          bestRect=rect;
+        }
       }
     }
 
-    node.setSide(bestSide);
-    placedLabels.push(node.label.getBoundingClientRect());
+    node.label.style.left = (bestRect.left-x)+"px";
+    node.label.style.top = (bestRect.top-y)+"px";
+    placedLabels.push({
+      left:bestRect.left-separation,
+      right:bestRect.right+separation,
+      top:bestRect.top-separation,
+      bottom:bestRect.bottom+separation
+    });
   }
 }
 
