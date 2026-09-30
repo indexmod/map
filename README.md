@@ -97,7 +97,7 @@ npm run test:published -- --mode hf
 ### Модель на опубликованной карте
 
 По умолчанию используется Cloudflare Workers AI через binding `AI` и
-`@cf/meta/llama-3.1-8b-instruct`, чтобы фоновые запросы не зависели от
+`@cf/meta/llama-3.3-70b-instruct-fp8-fast`, чтобы фоновые запросы не зависели от
 исчерпанных кредитов Hugging Face. Cloudflare предоставляет бесплатную суточную
 квоту, после которой запросы могут возвращать ошибку; см.
 [тарифы Workers AI](https://developers.cloudflare.com/workers-ai/platform/pricing/).

@@ -69,7 +69,7 @@ test('Cloudflare Workers AI returns structured profile', async () => {
   let calls = 0;
   const adapter = cloudflareAI({ AI: { run: async (model, input) => {
     calls++;
-    assert.equal(model, '@cf/meta/llama-3.1-8b-instruct');
+    assert.equal(model, '@cf/meta/llama-3.3-70b-instruct-fp8-fast');
     assert.equal(input.response_format.type, 'json_schema');
     return { response: emptyProfile() };
   } } });
