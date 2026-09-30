@@ -19,7 +19,7 @@ export function parseArticle(raw) {
 
 export async function fetchArticle(link, fetcher = fetch) {
   const url = canonicalURL(link);
-  const response = await fetcher(url.replace('indexmod.press/', 'indexmod.press/_get/'), { redirect: 'error', signal: AbortSignal.timeout(20000) });
+  const response = await fetcher(url.replace('indexmod.press/', 'indexmod.press/_get/'), { redirect: 'manual', signal: AbortSignal.timeout(20000) });
   if (!response.ok) throw new Error(`Article HTTP ${response.status}`);
   const data = await response.json();
   return { url, raw: data.raw };
