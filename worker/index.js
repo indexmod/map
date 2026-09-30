@@ -312,6 +312,7 @@ const ws = document.getElementById("workspace");
 let nodes = [];
 let busy = false;
 let savePromise = Promise.resolve();
+let mapState = {};
 const analysisStatus = document.getElementById("analysis-status");
 const analyzeButton = document.getElementById("analyze-map");
 let analyzerToken = sessionStorage.getItem("mapAnalyzerToken") || "";
@@ -678,7 +679,7 @@ function layoutLabels(){
 // SAVE / LOAD
 // =====================
 async function save(){
-  const body = JSON.stringify({ cards:nodes.map(n=>n.get()) });
+  const body = JSON.stringify({ ...mapState, cards:nodes.map(n=>n.get()) });
 
   savePromise = savePromise
     .catch(()=>{})
@@ -694,6 +695,7 @@ async function save(){
 async function load(){
   const r = await fetch("/api/load");
   const d = await r.json();
+  mapState = d;
 
   for(const i of (d.cards||[])){
     const n = createNode(i);
