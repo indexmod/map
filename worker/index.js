@@ -185,6 +185,7 @@ body{
   transform-origin:0 0;
 }
 .node.pending{animation-duration:1.35s}
+.node.recalculating{animation-duration:1.35s}
 .node.dragging{transition:none;animation:none;transform:none;opacity:1}
 .node.error .dot::before{box-shadow:0 0 0 3px #ff3b30}
 @media (prefers-reduced-motion:reduce){.node{transition:none;animation:none;transform:none;opacity:1}}
@@ -296,41 +297,62 @@ let nodes = [];
 let busy = false;
 let savePromise = Promise.resolve();
 let mapState = {};
+let lastPointer = { x:innerWidth/2, y:innerHeight/2 };
+let pendingAnalyses = 0;
+let activeJourneys = 0;
 const analysisStatus = document.getElementById("analysis-status");
 ${semanticPosition.toString()}
 ${ageTransform.toString()}
 
+window.addEventListener("pointermove",e=>{ lastPointer = {x:e.clientX,y:e.clientY}; },{passive:true});
+
+function updatePulse(){
+  const recalculating = pendingAnalyses > 0 || activeJourneys > 0;
+  for (const node of nodes) node.el.classList.toggle("recalculating",recalculating);
+}
+
 async function analyzeNode(node){
+  pendingAnalyses++;
+  updatePulse();
   node.setStatus("pending");
-  const response = await fetch("/api/analyze", {
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({link:node.get().link})
-  });
-  const analysis = await response.json();
-  if (!response.ok) throw new Error(analysis.error || "Analysis failed");
-  if (analysis.status === "analyzed") {
-    if (!nodes.includes(node)) return analysis;
-    node.setAnalysis(analysis);
-    node.setStatus("ready");
-    reflow();
-    await save();
+  try {
+    const response = await fetch("/api/analyze", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({link:node.get().link})
+    });
+    const analysis = await response.json();
+    if (!response.ok) throw new Error(analysis.error || "Analysis failed");
+    if (analysis.status === "analyzed") {
+      if (!nodes.includes(node)) return analysis;
+      node.setAnalysis(analysis);
+      node.setStatus("ready");
+      reflow();
+      await save();
+    }
+    return analysis;
+  } finally {
+    pendingAnalyses--;
+    updatePulse();
   }
-  return analysis;
 }
 
 function reflow(){
   const years = nodes.map(n => n.get().analysis?.result?.subjectYear).filter(Number.isFinite);
   const oldestYear = years.length > 1 && Math.min(...years) < Math.max(...years) ? Math.min(...years) : 1900;
   const newestYear = years.length > 1 && Math.min(...years) < Math.max(...years) ? Math.max(...years) : 2026;
+  const journeys = [];
   for (const node of nodes) {
     const profile = node.get().analysis?.result;
     if (!profile) continue;
     const base = semanticPosition(profile.scores);
     const target = ageTransform(base,profile.subjectYear,{oldestYear,newestYear}).position;
-    if (target) node.moveToNormalized(target);
+    if (target) journeys.push(node.visitTarget(target));
   }
-  scheduleLabelLayout();
+  if (!journeys.length) return;
+  activeJourneys++;
+  updatePulse();
+  Promise.allSettled(journeys).then(()=>{ activeJourneys--; updatePulse(); });
 }
 
 const colorAnchors = [
@@ -401,6 +423,7 @@ document.addEventListener("paste", async (e) => {
     return;
   }
 
+  const insertionPosition = cursorPosition();
   busy = true;
 
   try {
@@ -412,13 +435,13 @@ document.addEventListener("paste", async (e) => {
       title: meta.title || "Untitled",
       link: articleURL,
       status: "pending",
-      ...newNodePosition()
+      ...insertionPosition
     });
 
     ws.appendChild(node.el);
     nodes.push(node);
     while (nodes.length > 20) nodes.shift().el.remove();
-    reflow();
+    updatePulse();
     scheduleLabelLayout();
     await save();
     analysisStatus.textContent = "Analyzing " + node.get().title;
@@ -463,8 +486,7 @@ function createNode(d){
   let analysis = d.analysis || null;
   let status = d.status || (analysis ? "ready" : "pending");
   let manualOffset = d.manualOffset || { x:0, y:0 };
-  let baseTarget = null;
-  let touchedBeforeAnalysis = false;
+  let journey = null;
   const anchor = { x:0, y:0 };
 
   function render(){
@@ -481,22 +503,39 @@ function createNode(d){
   function moveTo(clientX,clientY,offsetX,offsetY){
     position.x = clamp((clientX-offsetX)/innerWidth,0.015,0.985);
     position.y = clamp((clientY-offsetY)/innerHeight,0.025,0.975);
-    if (baseTarget) manualOffset = { x:position.x-baseTarget.x, y:position.y-baseTarget.y };
-    else touchedBeforeAnalysis = true;
     render();
     scheduleLabelLayout();
   }
 
-  function moveToNormalized(target){
-    if (touchedBeforeAnalysis && !baseTarget) {
-      manualOffset = { x:position.x-target.x, y:position.y-target.y };
-      touchedBeforeAnalysis = false;
+  function stopJourneyAtVisiblePosition(){
+    if(!journey) return;
+    const style = getComputedStyle(el);
+    const visibleX = parseFloat(style.left);
+    const visibleY = parseFloat(style.top);
+    journey.cancel();
+    journey = null;
+    if(Number.isFinite(visibleX) && Number.isFinite(visibleY)){
+      position.x = clamp(visibleX/innerWidth,0.015,0.985);
+      position.y = clamp(visibleY/innerHeight,0.025,0.975);
+      render();
     }
-    baseTarget = target;
-    position.x = clamp(target.x+manualOffset.x,0.015,0.985);
-    position.y = clamp(target.y+manualOffset.y,0.025,0.975);
-    render();
-    scheduleLabelLayout();
+  }
+
+  function visitTarget(target){
+    stopJourneyAtVisiblePosition();
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return Promise.resolve();
+    const margin = dotMetrics().hitSize/2+12;
+    const destination = {
+      x:clamp(target.x*innerWidth,margin,innerWidth-margin),
+      y:clamp(target.y*innerHeight,margin,innerHeight-margin)
+    };
+    journey = el.animate([
+      {left:anchor.x+"px",top:anchor.y+"px",offset:0},
+      {left:destination.x+"px",top:destination.y+"px",offset:.5},
+      {left:anchor.x+"px",top:anchor.y+"px",offset:1}
+    ],{duration:7600,easing:"ease-in-out"});
+    const current = journey;
+    return current.finished.catch(()=>{}).then(()=>{if(journey===current) journey=null;});
   }
 
   let drag = false;
@@ -506,6 +545,7 @@ function createNode(d){
   dot.addEventListener("pointerdown",e=>{
     if(e.button!==0) return;
     e.preventDefault();
+    stopJourneyAtVisiblePosition();
     drag = true;
     offsetX = e.clientX-anchor.x;
     offsetY = e.clientY-anchor.y;
@@ -539,7 +579,7 @@ function createNode(d){
     el,
     label,
     position,
-    moveToNormalized,
+    visitTarget,
     setAnalysis:value=>{ analysis = value; dot.title = "Analyzed " + (value.updated || ""); },
     setStatus:value=>{ status = value; el.classList.remove("pending","ready","error"); el.classList.add(value); },
     anchor,
@@ -566,24 +606,12 @@ function dotMetrics(){
   };
 }
 
-function newNodePosition(){
-  const {hitSize} = dotMetrics();
-  const spacing = hitSize+20;
-  const margin = hitSize/2+12;
-  let best = { x:innerWidth/2, y:innerHeight/2, distance:-1 };
-  for(let ring=0;ring<=Math.ceil(Math.hypot(innerWidth,innerHeight)/spacing);ring++){
-    const count = Math.max(1,ring*8);
-    for(let step=0;step<count;step++){
-      const angle = step/count*Math.PI*2;
-      const x = innerWidth/2+Math.cos(angle)*ring*spacing;
-      const y = innerHeight/2+Math.sin(angle)*ring*spacing;
-      if(x<margin || x>innerWidth-margin || y<margin || y>innerHeight-margin) continue;
-      const distance = Math.min(...nodes.map(node=>Math.hypot(x-node.anchor.x,y-node.anchor.y)));
-      if(distance>=spacing) return { nx:x/innerWidth, ny:y/innerHeight };
-      if(distance>best.distance) best = {x,y,distance};
-    }
-  }
-  return { nx:best.x/innerWidth, ny:best.y/innerHeight };
+function cursorPosition(){
+  const margin = dotMetrics().hitSize/2+12;
+  return {
+    nx:clamp(lastPointer.x,margin,innerWidth-margin)/innerWidth,
+    ny:clamp(lastPointer.y,margin,innerHeight-margin)/innerHeight
+  };
 }
 
 function overlapArea(a,b){
@@ -701,7 +729,7 @@ window.addEventListener("resize",()=>{
 });
 
 load().then(()=>{
-  reflow();
+  scheduleLabelLayout();
   for (const node of nodes.filter(n => !n.get().analysis)) {
     analyzeNode(node).catch(error => { node.setStatus("error"); analysisStatus.textContent = error.message; });
   }
