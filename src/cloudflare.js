@@ -1,7 +1,7 @@
 // Workers AI fallback when Hugging Face credits are unavailable.
 export function cloudflareAI(env) {
   if (!env.AI?.run) throw new Error('Cloudflare Workers AI binding is unavailable');
-  const model = env.CF_MODEL || '@cf/meta/llama-3.1-8b-instruct';
+  const model = env.CF_MODEL || '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
   const endpoint = 'cloudflare-workers-ai';
   return { model, endpoint, infer: async ({ prompt, article, schema }) => {
     // This small model has a shorter context than Qwen. Keep the beginning and

@@ -9,7 +9,7 @@ fallthrough = true
 
 [vars]
 MAP_AI_PROVIDER = "cloudflare"
-CF_MODEL = "@cf/meta/llama-3.1-8b-instruct"
+CF_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
 HF_MODEL = "Qwen/Qwen3-4B-Instruct-2507:nscale"
 HF_ENDPOINT = "https://router.huggingface.co/v1/chat/completions"
 
