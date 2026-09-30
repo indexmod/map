@@ -42,6 +42,35 @@ test('new pasted article without September frontmatter is analyzed through Worke
     assert.equal(calls, 1);
   } finally { globalThis.fetch = original; }
 });
+test('Cyrillic article text reaches inference intact and supports verbatim evidence', async () => {
+  const original = globalThis.fetch;
+  const raw = '---\ntitle: Огненная Леди\nupdated: 2026-09-29\n---\nОгненная Леди — независимый театральный проект московской клубной сцены с 1993 года.';
+  globalThis.fetch = async url => {
+    assert.equal(url, 'https://indexmod.press/_get/ognennaya-lady');
+    return Response.json({ raw });
+  };
+  const profile = { subjectType: 'project', subjectYear: 1993,
+    scores: { institutional: 0, underground: .9, commercial: .1, experimental: .8 }, confidence: .85,
+    evidence: { subjectType: ['проект'], subjectYear: ['с 1993 года'], institutional: ['проект'], underground: ['независимый'], commercial: ['проект'], experimental: ['театральный проект'] } };
+  let calls = 0;
+  const store = new Map();
+  const env = { MAP_AI_PROVIDER: 'cloudflare', AI: { run: async (model, input) => {
+    calls++;
+    assert.match(input.messages[1].content, /Огненная Леди — независимый театральный проект/);
+    return { response: profile };
+  } }, MAP_DB: { get: async key => store.get(key), put: async (key, value) => store.set(key, value) } };
+  try {
+    const request = () => new Request('https://map.indexmod.press/api/analyze', { method: 'POST', body: JSON.stringify({ link: 'https://indexmod.press/ognennaya-lady' }) });
+    const first = await (await worker.fetch(request(), env)).json();
+    assert.equal(first.status, 'analyzed');
+    assert.equal(first.result.subjectYear, 1993);
+    assert.deepEqual(first.evidenceWarnings, []);
+    assert.ok(first.targetPosition);
+    const second = await (await worker.fetch(request(), env)).json();
+    assert.equal(second.cacheHit, true);
+    assert.equal(calls, 1);
+  } finally { globalThis.fetch = original; }
+});
 test('live map editor can analyze and cache a dated article while saved state stays untouched', async () => {
   const original = globalThis.fetch;
   const stored = new Map([['map_state', JSON.stringify({ generation: 2, cards: [{ link: 'https://indexmod.press/example', nx: .2, ny: .3 }] })]]);
