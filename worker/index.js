@@ -175,14 +175,19 @@ body{
 
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 
-@keyframes breathe{0%,100%{transform:translate(-50%,-50%) scale(.92);opacity:.84}50%{transform:translate(-50%,-50%) scale(1.12);opacity:1}}
-@keyframes drift{0%,100%{transform:translateY(-2px)}50%{transform:translateY(2px)}}
-.node{transition:left 1.8s cubic-bezier(.2,.7,.15,1),top 1.8s cubic-bezier(.2,.7,.15,1);animation:drift 5s ease-in-out infinite}
-.node .dot::before{animation:breathe 3.2s ease-in-out infinite}
-.node.pending .dot::before{animation-duration:1.1s}
-.node.dragging{transition:none;animation:none}
+@keyframes nodePulse{
+  0%,100%{transform:translateY(-2px) scale(.97);opacity:.86}
+  50%{transform:translateY(2px) scale(1.045);opacity:1}
+}
+.node{
+  transition:left 3.8s cubic-bezier(.22,.61,.24,1),top 3.8s cubic-bezier(.22,.61,.24,1);
+  animation:nodePulse 4.6s ease-in-out infinite;
+  transform-origin:0 0;
+}
+.node.pending{animation-duration:1.35s}
+.node.dragging{transition:none;animation:none;transform:none;opacity:1}
 .node.error .dot::before{box-shadow:0 0 0 3px #ff3b30}
-@media (prefers-reduced-motion:reduce){.node,.node .dot::before{transition:none;animation:none}}
+@media (prefers-reduced-motion:reduce){.node{transition:none;animation:none;transform:none;opacity:1}}
 
 .node{
   position:absolute;
