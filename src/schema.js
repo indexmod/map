@@ -23,8 +23,18 @@ export function validateProfile(p, article) {
     const value = dimensions.includes(key) ? p.scores[key] : p[key];
     if (dimensions.includes(key) && value !== null && !unit(value)) throw new Error(`Invalid score: ${key}`);
     const quotes = p.evidence[key];
-    if (!Array.isArray(quotes) || quotes.length > 5 || quotes.some(q => typeof q !== 'string' || !q.trim() || !article.includes(q)) || (value === null ? quotes.length !== 0 : quotes.length === 0)) throw new Error(`Invalid evidence: ${key}`);
+    if (!Array.isArray(quotes) || quotes.length > 5 || quotes.some(q => typeof q !== 'string' || !q.trim())) throw new Error(`Invalid evidence: ${key}`);
   }
   if (evidenceFields.every(k => (dimensions.includes(k) ? p.scores[k] : p[k]) === null) && p.confidence !== 0) throw new Error('Unknown profile must have zero confidence');
   return p;
+}
+
+export function evidenceWarnings(profile, article) {
+  return evidenceFields.flatMap(key => {
+    const value = dimensions.includes(key) ? profile.scores[key] : profile[key];
+    const quotes = profile.evidence[key];
+    if (value !== null && quotes.length === 0) return [`${key}: no supporting excerpt`];
+    if (quotes.some(quote => !article.includes(quote))) return [`${key}: excerpt is not verbatim`];
+    return [];
+  });
 }
