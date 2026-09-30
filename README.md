@@ -23,6 +23,7 @@
 и текущий дизайн не изменены. Анализатор никогда не записывает `map_state`.
 
 ```sh
+cd /Users/andrei/Documents/Codex/2026-09-30/referenced-chatgpt-conversation-this-is-an/work/map
 npm ci
 npm test
 # Актуальные опубликованные ссылки и исходники:
