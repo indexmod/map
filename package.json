@@ -1,0 +1,13 @@
+{
+  "name": "indexmod-map",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "test:published": "node scripts/test-published.mjs",
+    "dev:test": "wrangler dev --config wrangler.test.toml"
+  },
+  "devDependencies": {
+    "wrangler": "4.131.2"
+  }
+}
