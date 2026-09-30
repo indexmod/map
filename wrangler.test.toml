@@ -1,0 +1,18 @@
+name = "map-analyzer-test"
+main = "worker/test.js"
+compatibility_date = "2026-06-27"
+workers_dev = true
+
+[[rules]]
+type = "Text"
+globs = ["**/*.md"]
+fallthrough = true
+
+[vars]
+HF_MODEL = "Qwen/Qwen3-4B-Instruct-2507"
+HF_ENDPOINT = "https://router.huggingface.co/v1/chat/completions"
+
+# Optional separate KV cache: create it and add its real id before deploying.
+# [[kv_namespaces]]
+# binding = "ANALYSIS_CACHE"
+# id = "..."

@@ -1,0 +1,4 @@
+ANALYZER_TEST_TOKEN=replace-with-a-local-test-password
+HF_MODEL=Qwen/Qwen3-4B-Instruct-2507
+HF_ENDPOINT=https://router.huggingface.co/v1/chat/completions
+# HF_TOKEN=  # needed only for explicit hf mode

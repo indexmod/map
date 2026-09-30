@@ -1,0 +1,147 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "subjectType",
+    "subjectYear",
+    "scores",
+    "confidence",
+    "evidence"
+  ],
+  "properties": {
+    "subjectType": {
+      "enum": [
+        "person",
+        "brand",
+        "company",
+        "institution",
+        "publication",
+        "venue",
+        "event",
+        "movement",
+        "project",
+        "other",
+        null
+      ]
+    },
+    "subjectYear": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1,
+      "maximum": 2026
+    },
+    "scores": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "institutional",
+        "underground",
+        "commercial",
+        "experimental"
+      ],
+      "properties": {
+        "institutional": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "underground": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "commercial": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "experimental": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "subjectType",
+        "subjectYear",
+        "institutional",
+        "underground",
+        "commercial",
+        "experimental"
+      ],
+      "properties": {
+        "subjectType": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "maxItems": 5
+        },
+        "subjectYear": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "maxItems": 5
+        },
+        "institutional": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "maxItems": 5
+        },
+        "underground": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "maxItems": 5
+        },
+        "commercial": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "maxItems": 5
+        },
+        "experimental": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "maxItems": 5
+        }
+      }
+    }
+  }
+}
