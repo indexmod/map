@@ -8,19 +8,26 @@
 - Перетащите цветной кружок мышью или пальцем. Положение сохраняется автоматически.
 - Нажмите на название, чтобы открыть статью, или на `✖`, чтобы убрать точку.
 - Координаты относительны размеру экрана; на телефоне подписи выбирают свободное место рядом с кружками.
+- Кнопка `Analyze map` последовательно анализирует опубликованные точки с подходящим `updated`, ставит их на рассчитанные позиции и сохраняет результат. Для неё нужен редакторский токен. Перетаскивание после анализа сохраняет ручную позицию.
+- Новая ссылка появляется сразу; если в текущей сессии уже введён редакторский токен, подходящая статья анализируется автоматически. Остальные ссылки продолжают работать как прежде.
 
 ## Публикация
 
 Это Cloudflare Worker. Конфигурация `wrangler.toml` задаёт имя `map` и Custom Domain `map.indexmod.press`. GitHub Actions при публикации создаёт или находит отдельное KV-пространство `MAP_DB`, подставляет его ID в конфигурацию и запускает `wrangler deploy`. При наличии зоны `indexmod.press` в аккаунте Cloudflare Wrangler также привязывает домен.
 
-Для запуска workflow нужен секрет `CLOUDFLARE_API_TOKEN` с правами на Workers, Workers KV и маршруты зоны. Секреты других личных репозиториев GitHub автоматически не передаются в новый репозиторий. Данные `moscow` не используются.
+Для запуска workflow нужны GitHub Actions secrets `CLOUDFLARE_API_TOKEN`,
+`HF_TOKEN` и `MAP_ANALYZER_TOKEN`. Последние два workflow записывает в Cloudflare
+Worker secrets. Секреты других репозиториев автоматически не передаются.
+Данные `moscow` не используются.
 
 Локально: установите Wrangler (`npm install --no-save --no-package-lock wrangler@4.131.2`), укажите `CLOUDFLARE_API_TOKEN`, выполните `node scripts/prepare-kv.mjs`, затем `npx wrangler deploy`. Скрипт меняет локальный `wrangler.toml` после создания KV; ID можно сохранить в репозитории отдельным коммитом.
 
-## Практический семантический тест (отдельно от карты)
+## Семантический анализ карты
 
-Требуется Node.js 22+. Production-файлы `worker/index.js`, `wrangler.toml`
-и текущий дизайн не изменены. Анализатор никогда не записывает `map_state`.
+Требуется Node.js 22+. Отчётный CLI не записывает `map_state`.
+На опубликованной карте результат записывается в `map_state` только после
+нажатия `Analyze map` или добавления новой ссылки авторизованным редактором.
+До ответа модели исходная позиция сохраняется.
 
 ```sh
 cd /Users/andrei/Documents/Codex/2026-09-30/referenced-chatgpt-conversation-this-is-an/work/map
@@ -57,7 +64,7 @@ JSON Schema: `schemas/analysis.schema.json`; исполняемая схема �
 Иначе `x=(commercial+experimental)/sum`, `y=(underground+experimental)/sum`:
 institutional — верхний левый угол, commercial — верхний правый,
 underground — нижний левый, experimental — нижний правый.
-Это соглашение тестового движка, без новых подписей в существующем UI.
+Это соглашение движка карты; новые подписи к осям не добавлены.
 
 Возраст применяется после semanticPosition: относительно центра (0.5,0.5),
 масштаб от 0.35 для 1900 и старше до 1 для 2026. Границы фиксированы, поэтому
@@ -70,23 +77,42 @@ underground — нижний левый, experimental — нижний прав�
 заново. Ключ включает promptHash, analyzerVersion, contentHash (весь raw), mode,
 model и endpoint. CLI-кэш: `.cache/analysis`. Новый текст промпта автоматически
 меняет хэш. Worker включает prompt-файл в сборку: после редактирования нужен
-перезапуск/деплой тестового Worker.
+новый деплой Worker.
 
 ### Hugging Face (опционально)
 
 ```sh
 # HF_TOKEN задайте через окружение; не сохраняйте в Git.
-export HF_MODEL=Qwen/Qwen3-4B-Instruct-2507
+export HF_MODEL=Qwen/Qwen3-4B-Instruct-2507:nscale
 export HF_ENDPOINT=https://router.huggingface.co/v1/chat/completions
 npm run test:published -- --mode hf
 ```
 
-Используется chat completions с temperature 0, строгим разбором JSON и
+Используется chat completions с temperature 0, structured JSON Schema и
 проверкой evidence: каждая цитата обязана встречаться в очищенной статье.
 Это проверяет наличие цитат, но не гарантирует правильность интерпретации.
 Доступность конкретной модели зависит от HF provider/account; при отсутствии
 поддержки отчёт покажет ошибку, без подмены модели или фиктивных оценок.
 Конфигурация следует [HF Inference Providers](https://huggingface.co/docs/inference-providers/index).
+
+### Включение модели на опубликованной карте
+
+1. Создайте [HF access token](https://huggingface.co/settings/tokens/new?preset=inference)
+   с правом `Make calls to Inference Providers`. Токен не присылайте в чат.
+2. В GitHub `indexmod/map` → Settings → Secrets and variables → Actions
+   сохраните его как `HF_TOKEN`. Там же создайте `MAP_ANALYZER_TOKEN` — длинную
+   случайную строку, которую будете вводить на карте как editor token.
+3. После принятия PR workflow передаст оба значения Cloudflare как Worker
+   secrets. Откройте `map.indexmod.press`, нажмите `Analyze map` и введите
+   значение `MAP_ANALYZER_TOKEN`. Токен хранится только в `sessionStorage`
+   браузера до закрытия сессии; в ссылку карты он не включается.
+
+Карта обрабатывает существующие точки последовательно и показывает число
+размещённых, пропущенных и ошибочных. Только статьи с frontmatter
+`updated: 2026-09-XX` проходят анализ. Если оценки не дают координату,
+существующая точка остаётся на месте. Уже рассчитанный профиль берётся из
+отдельного кэша KV. Вызовы модели могут расходовать лимит HF; проверьте
+[текущие условия Inference Providers](https://huggingface.co/docs/inference-providers/en/pricing).
 
 ### Тест в Worker
 

@@ -2,6 +2,15 @@ name = "map"
 main = "worker/index.js"
 compatibility_date = "2026-06-27"
 
+[[rules]]
+type = "Text"
+globs = ["**/*.md"]
+fallthrough = true
+
+[vars]
+HF_MODEL = "Qwen/Qwen3-4B-Instruct-2507:nscale"
+HF_ENDPOINT = "https://router.huggingface.co/v1/chat/completions"
+
 [[kv_namespaces]]
 binding = "MAP_DB"
 

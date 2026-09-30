@@ -1,3 +1,8 @@
+import prompt from '../prompts/map-semantic.md';
+import { analyze } from '../src/analyze.js';
+import { fetchArticle } from '../src/article.js';
+import { huggingFace } from '../src/huggingface.js';
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
@@ -64,6 +69,25 @@ export default {
     if (url.pathname === "/api/load") {
       const raw = await env.MAP_DB.get("map_state");
       return Response.json(raw ? JSON.parse(raw) : { cards: [] });
+    }
+
+    // Costly inference is available only to the map editor. Analysis is cached
+    // separately from map_state and never moves a card by itself.
+    if (url.pathname === "/api/analyze") {
+      if (req.method !== 'POST') return new Response('Use POST', { status: 405 });
+      if (!env.MAP_ANALYZER_TOKEN || req.headers.get('Authorization') !== `Bearer ${env.MAP_ANALYZER_TOKEN}`) {
+        return new Response('Unauthorized', { status: 401 });
+      }
+      try {
+        const body = await req.json();
+        const { url: articleURL, raw } = await fetchArticle(body.link);
+        const hf = huggingFace(env);
+        const result = await analyze({ raw, prompt, mode: 'hf', model: hf.model,
+          endpoint: hf.endpoint, infer: hf.infer, cache: env.MAP_DB });
+        return Response.json({ url: articleURL, ...result }, { headers: { 'Cache-Control': 'no-store' } });
+      } catch (error) {
+        return Response.json({ error: error.message }, { status: 502 });
+      }
     }
 
     // =====================
@@ -137,6 +161,28 @@ body{
   z-index:1;
   touch-action:none;
 }
+
+.analysis-controls{
+  position:fixed;
+  left:12px;
+  bottom:12px;
+  z-index:20;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  max-width:calc(100vw - 24px);
+  padding:6px 8px;
+  background:rgba(255,255,255,.94);
+  font-size:12px;
+}
+.analysis-controls button{
+  font:inherit;
+  border:1px solid #000;
+  background:#fff;
+  padding:7px 9px;
+  cursor:pointer;
+}
+.analysis-controls output{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 .node{
   position:absolute;
@@ -259,12 +305,65 @@ body{
 <body>
 <img class="sphere-logo" src="https://indexmod.press/logo.svg" alt="Indexmod" aria-hidden="true">
 <div id="workspace"></div>
+<div class="analysis-controls"><button id="analyze-map" type="button">Analyze map</button><output id="analysis-status" aria-live="polite"></output></div>
 
 <script>
 const ws = document.getElementById("workspace");
 let nodes = [];
 let busy = false;
 let savePromise = Promise.resolve();
+const analysisStatus = document.getElementById("analysis-status");
+const analyzeButton = document.getElementById("analyze-map");
+let analyzerToken = sessionStorage.getItem("mapAnalyzerToken") || "";
+
+function editorToken(){
+  if (!analyzerToken) {
+    analyzerToken = prompt("Map editor token (stored for this browser session):") || "";
+    if (analyzerToken) sessionStorage.setItem("mapAnalyzerToken", analyzerToken);
+  }
+  return analyzerToken;
+}
+
+async function analyzeNode(node){
+  if (!analyzerToken) return;
+  const response = await fetch("/api/analyze", {
+    method:"POST",
+    headers:{"Content-Type":"application/json","Authorization":"Bearer "+analyzerToken},
+    body:JSON.stringify({link:node.get().link})
+  });
+  if (response.status === 401) {
+    analyzerToken = "";
+    sessionStorage.removeItem("mapAnalyzerToken");
+    throw new Error("Editor token is invalid or not configured");
+  }
+  const analysis = await response.json();
+  if (!response.ok) throw new Error(analysis.error || "Analysis failed");
+  if (analysis.status === "analyzed") {
+    node.setAnalysis(analysis);
+    if (analysis.targetPosition) node.moveToNormalized(analysis.targetPosition);
+    await save();
+  }
+  return analysis;
+}
+
+analyzeButton.addEventListener("click", async () => {
+  if (!editorToken()) return;
+  analyzeButton.disabled = true;
+  let placed = 0, skipped = 0, failed = 0;
+  for (let index = 0; index < nodes.length; index++) {
+    analysisStatus.textContent = (index + 1) + "/" + nodes.length;
+    try {
+      const result = await analyzeNode(nodes[index]);
+      if (result?.targetPosition) placed++; else skipped++;
+    } catch (error) {
+      failed++;
+      analysisStatus.textContent = error.message;
+      if (!analyzerToken) break;
+    }
+  }
+  analysisStatus.textContent = placed + " placed, " + skipped + " without target, " + failed + " failed";
+  analyzeButton.disabled = false;
+});
 
 const colorAnchors = [
   { x:0.5, y:0.5, color:[48,48,48] },
@@ -341,7 +440,11 @@ document.addEventListener("paste", async (e) => {
     ws.appendChild(node.el);
     nodes.push(node);
     scheduleLabelLayout();
-    save();
+    await save();
+    if (analyzerToken) {
+      try { await analyzeNode(node); }
+      catch (error) { analysisStatus.textContent = error.message; }
+    }
 
   } finally {
     busy = false;
@@ -377,6 +480,7 @@ function createNode(d){
   el.appendChild(label);
 
   const position = normalizedPosition(d);
+  let analysis = d.analysis || null;
   const anchor = { x:0, y:0 };
 
   function render(){
@@ -393,6 +497,13 @@ function createNode(d){
   function moveTo(clientX,clientY,offsetX,offsetY){
     position.x = clamp((clientX-offsetX)/innerWidth,0.015,0.985);
     position.y = clamp((clientY-offsetY)/innerHeight,0.025,0.975);
+    render();
+    scheduleLabelLayout();
+  }
+
+  function moveToNormalized(target){
+    position.x = clamp(target.x,0.015,0.985);
+    position.y = clamp(target.y,0.025,0.975);
     render();
     scheduleLabelLayout();
   }
@@ -444,12 +555,15 @@ function createNode(d){
     el,
     label,
     position,
+    moveToNormalized,
+    setAnalysis:value=>{ analysis = value; dot.title = "Analyzed " + (value.updated || ""); },
     anchor,
     render,
     get:()=>({
       id:d.id,
       title:d.title,
       link:d.link,
+      analysis,
       nx:Number(position.x.toFixed(6)),
       ny:Number(position.y.toFixed(6))
     })

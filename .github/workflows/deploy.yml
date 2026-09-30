@@ -28,6 +28,16 @@ jobs:
         run: node scripts/prepare-kv.mjs
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Configure analyzer secrets
+        run: |
+          test -n "$HF_TOKEN"
+          test -n "$MAP_ANALYZER_TOKEN"
+          printf '%s' "$HF_TOKEN" | npx wrangler secret put HF_TOKEN
+          printf '%s' "$MAP_ANALYZER_TOKEN" | npx wrangler secret put MAP_ANALYZER_TOKEN
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          MAP_ANALYZER_TOKEN: ${{ secrets.MAP_ANALYZER_TOKEN }}
       - name: Deploy Worker and custom domain
         run: npx wrangler deploy
         env:

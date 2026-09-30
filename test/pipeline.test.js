@@ -58,7 +58,7 @@ test('published run isolates errors, preserves positions and deduplicates', asyn
 test('HF request configuration and failures', async () => {
   assert.throws(() => huggingFace({}));
   const adapter = huggingFace({ HF_TOKEN: 'test' }, async (url, options) => {
-    assert.equal(JSON.parse(options.body).model, 'Qwen/Qwen3-4B-Instruct-2507');
+    assert.equal(JSON.parse(options.body).model, 'Qwen/Qwen3-4B-Instruct-2507:nscale');
     assert.equal(options.redirect, 'error');
     return Response.json({ choices: [{ message: { content: JSON.stringify(emptyProfile()) }, finish_reason: 'stop' }] });
   });
