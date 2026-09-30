@@ -1,7 +1,10 @@
 import prompt from '../prompts/map-semantic.md';
-import { analyze } from '../src/analyze.js';
+import { analyze, hash } from '../src/analyze.js';
 import { fetchArticle } from '../src/article.js';
 import { huggingFace } from '../src/huggingface.js';
+import { cloudflareAI } from '../src/cloudflare.js';
+import { semanticPosition, ageTransform } from '../src/position.js';
+const MAP_GENERATION = 2;
 
 export default {
   async fetch(req, env) {
@@ -68,22 +71,29 @@ export default {
     // =====================
     if (url.pathname === "/api/load") {
       const raw = await env.MAP_DB.get("map_state");
-      return Response.json(raw ? JSON.parse(raw) : { cards: [] });
+      const state = raw ? JSON.parse(raw) : { cards: [] };
+      if (state.generation !== MAP_GENERATION) {
+        const fresh = { generation: MAP_GENERATION, cards: [] };
+        await env.MAP_DB.put("map_state", JSON.stringify(fresh));
+        return Response.json(fresh);
+      }
+      return Response.json(state);
     }
 
-    // Costly inference is available only to the map editor. Analysis is cached
-    // separately from map_state and never moves a card by itself.
+    // Analysis is cached separately from map_state and never moves a card by itself.
     if (url.pathname === "/api/analyze") {
       if (req.method !== 'POST') return new Response('Use POST', { status: 405 });
-      if (!env.MAP_ANALYZER_TOKEN || req.headers.get('Authorization') !== `Bearer ${env.MAP_ANALYZER_TOKEN}`) {
-        return new Response('Unauthorized', { status: 401 });
-      }
       try {
         const body = await req.json();
         const { url: articleURL, raw } = await fetchArticle(body.link);
-        const hf = huggingFace(env);
-        const result = await analyze({ raw, prompt, mode: 'hf', model: hf.model,
-          endpoint: hf.endpoint, infer: hf.infer, cache: env.MAP_DB });
+        const hour = new Date().toISOString().slice(0, 13);
+        const limitKey = `rate:${await hash(`${req.headers.get('CF-Connecting-IP') || 'unknown'}:${hour}`)}`;
+        const used = Number(await env.MAP_DB.get(limitKey)) || 0;
+        if (used >= 30) return Response.json({ error: 'Analysis limit reached; try again later' }, { status: 429 });
+        await env.MAP_DB.put(limitKey, String(used + 1), { expirationTtl: 7200 });
+        const engine = env.MAP_AI_PROVIDER === 'hf' ? huggingFace(env) : cloudflareAI(env);
+        const result = await analyze({ raw, prompt, mode: 'hf', model: engine.model,
+          endpoint: engine.endpoint, infer: engine.infer, cache: env.MAP_DB, requireSeptember: false });
         return Response.json({ url: articleURL, ...result }, { headers: { 'Cache-Control': 'no-store' } });
       } catch (error) {
         return Response.json({ error: error.message }, { status: 502 });
@@ -95,6 +105,7 @@ export default {
     // =====================
     if (url.pathname === "/api/save") {
       const data = await req.json();
+      if (data?.generation !== MAP_GENERATION || !Array.isArray(data.cards)) return new Response('Outdated map state', { status: 409 });
       await env.MAP_DB.put("map_state", JSON.stringify(data));
       return Response.json({ ok: true });
     }
@@ -162,27 +173,16 @@ body{
   touch-action:none;
 }
 
-.analysis-controls{
-  position:fixed;
-  left:12px;
-  bottom:12px;
-  z-index:20;
-  display:flex;
-  align-items:center;
-  gap:10px;
-  max-width:calc(100vw - 24px);
-  padding:6px 8px;
-  background:rgba(255,255,255,.94);
-  font-size:12px;
-}
-.analysis-controls button{
-  font:inherit;
-  border:1px solid #000;
-  background:#fff;
-  padding:7px 9px;
-  cursor:pointer;
-}
-.analysis-controls output{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+@keyframes breathe{0%,100%{transform:translate(-50%,-50%) scale(.92);opacity:.84}50%{transform:translate(-50%,-50%) scale(1.12);opacity:1}}
+@keyframes drift{0%,100%{transform:translateY(-2px)}50%{transform:translateY(2px)}}
+.node{transition:left 1.8s cubic-bezier(.2,.7,.15,1),top 1.8s cubic-bezier(.2,.7,.15,1);animation:drift 5s ease-in-out infinite}
+.node .dot::before{animation:breathe 3.2s ease-in-out infinite}
+.node.pending .dot::before{animation-duration:1.1s}
+.node.dragging{transition:none;animation:none}
+.node.error .dot::before{box-shadow:0 0 0 3px #ff3b30}
+@media (prefers-reduced-motion:reduce){.node,.node .dot::before{transition:none;animation:none}}
 
 .node{
   position:absolute;
@@ -252,24 +252,6 @@ body{
   white-space:normal;
 }
 
-.del{
-  flex:0 0 auto;
-  color:#000;
-  cursor:pointer;
-  opacity:.35;
-  font-size:clamp(12px,1.15vw,16px);
-  display:grid;
-  place-items:center;
-  width:32px;
-  min-height:32px;
-  line-height:1;
-}
-
-.del:hover,
-.del:focus-visible{
-  opacity:1;
-}
-
 @media (max-width:600px), (pointer:coarse){
   :root{
     --dot-size:48px;
@@ -286,11 +268,7 @@ body{
     line-height:1.3;
   }
 
-  .del{
-    width:40px;
-    min-height:40px;
-    font-size:16px;
-  }
+
 }
 
 @media (max-width:600px){
@@ -305,7 +283,7 @@ body{
 <body>
 <img class="sphere-logo" src="https://indexmod.press/logo.svg" alt="Indexmod" aria-hidden="true">
 <div id="workspace"></div>
-<div class="analysis-controls"><button id="analyze-map" type="button">Analyze map</button><output id="analysis-status" aria-live="polite"></output></div>
+<output id="analysis-status" class="sr-only" aria-live="polite"></output>
 
 <script>
 const ws = document.getElementById("workspace");
@@ -314,57 +292,41 @@ let busy = false;
 let savePromise = Promise.resolve();
 let mapState = {};
 const analysisStatus = document.getElementById("analysis-status");
-const analyzeButton = document.getElementById("analyze-map");
-let analyzerToken = sessionStorage.getItem("mapAnalyzerToken") || "";
-
-function editorToken(){
-  if (!analyzerToken) {
-    analyzerToken = prompt("Map editor token (stored for this browser session):") || "";
-    if (analyzerToken) sessionStorage.setItem("mapAnalyzerToken", analyzerToken);
-  }
-  return analyzerToken;
-}
+${semanticPosition.toString()}
+${ageTransform.toString()}
 
 async function analyzeNode(node){
-  if (!analyzerToken) return;
+  node.setStatus("pending");
   const response = await fetch("/api/analyze", {
     method:"POST",
-    headers:{"Content-Type":"application/json","Authorization":"Bearer "+analyzerToken},
+    headers:{"Content-Type":"application/json"},
     body:JSON.stringify({link:node.get().link})
   });
-  if (response.status === 401) {
-    analyzerToken = "";
-    sessionStorage.removeItem("mapAnalyzerToken");
-    throw new Error("Editor token is invalid or not configured");
-  }
   const analysis = await response.json();
   if (!response.ok) throw new Error(analysis.error || "Analysis failed");
   if (analysis.status === "analyzed") {
+    if (!nodes.includes(node)) return analysis;
     node.setAnalysis(analysis);
-    if (analysis.targetPosition) node.moveToNormalized(analysis.targetPosition);
+    node.setStatus("ready");
+    reflow();
     await save();
   }
   return analysis;
 }
 
-analyzeButton.addEventListener("click", async () => {
-  if (!editorToken()) return;
-  analyzeButton.disabled = true;
-  let placed = 0, skipped = 0, failed = 0;
-  for (let index = 0; index < nodes.length; index++) {
-    analysisStatus.textContent = (index + 1) + "/" + nodes.length;
-    try {
-      const result = await analyzeNode(nodes[index]);
-      if (result?.targetPosition) placed++; else skipped++;
-    } catch (error) {
-      failed++;
-      analysisStatus.textContent = error.message;
-      if (!analyzerToken) break;
-    }
+function reflow(){
+  const years = nodes.map(n => n.get().analysis?.result?.subjectYear).filter(Number.isFinite);
+  const oldestYear = years.length > 1 && Math.min(...years) < Math.max(...years) ? Math.min(...years) : 1900;
+  const newestYear = years.length > 1 && Math.min(...years) < Math.max(...years) ? Math.max(...years) : 2026;
+  for (const node of nodes) {
+    const profile = node.get().analysis?.result;
+    if (!profile) continue;
+    const base = semanticPosition(profile.scores);
+    const target = ageTransform(base,profile.subjectYear,{oldestYear,newestYear}).position;
+    if (target) node.moveToNormalized(target);
   }
-  analysisStatus.textContent = placed + " placed, " + skipped + " without target, " + failed + " failed";
-  analyzeButton.disabled = false;
-});
+  scheduleLabelLayout();
+}
 
 const colorAnchors = [
   { x:0.5, y:0.5, color:[48,48,48] },
@@ -420,33 +382,50 @@ function colorAt(x,y){
 // PASTE
 // =====================
 document.addEventListener("paste", async (e) => {
-  const text = e.clipboardData.getData("text");
-
-  if (!text.startsWith("http")) return;
+  const text = e.clipboardData.getData("text").trim();
+  let articleURL;
+  try {
+    const u = new URL(text);
+    const segments = u.pathname.split("/").filter(Boolean);
+    if (u.protocol !== "https:" || u.hostname !== "indexmod.press" || segments.length !== 1) return;
+    articleURL = u.origin + "/" + segments[0];
+  } catch { return; }
   if (busy) return;
+  if (nodes.some(node => node.get().link === articleURL)) {
+    analysisStatus.textContent = "This article is already on the map";
+    return;
+  }
 
   busy = true;
 
   try {
-    const r = await fetch("/api/title?url=" + encodeURIComponent(text));
+    const r = await fetch("/api/title?url=" + encodeURIComponent(articleURL));
     const meta = await r.json();
 
     const node = createNode({
       id: crypto.randomUUID(),
       title: meta.title || "Untitled",
-      link: text,
+      link: articleURL,
+      status: "pending",
       ...newNodePosition()
     });
 
     ws.appendChild(node.el);
     nodes.push(node);
+    while (nodes.length > 20) nodes.shift().el.remove();
+    reflow();
     scheduleLabelLayout();
     await save();
-    if (analyzerToken) {
-      try { await analyzeNode(node); }
-      catch (error) { analysisStatus.textContent = error.message; }
-    }
+    analysisStatus.textContent = "Analyzing " + node.get().title;
+    analyzeNode(node).then(result => {
+      analysisStatus.textContent = result?.targetPosition ? "Placed " + node.get().title : "No position for " + node.get().title;
+    }).catch(error => {
+      node.setStatus("error");
+      analysisStatus.textContent = error.message;
+    });
 
+  } catch (error) {
+    analysisStatus.textContent = error.message;
   } finally {
     busy = false;
   }
@@ -457,7 +436,7 @@ document.addEventListener("paste", async (e) => {
 // =====================
 function createNode(d){
   const el = document.createElement("div");
-  el.className = "node";
+  el.className = "node " + (d.status || (d.analysis ? "ready" : "pending"));
 
   const dot = document.createElement("div");
   dot.className = "dot";
@@ -468,20 +447,19 @@ function createNode(d){
   a.target = "_blank";
   a.textContent = d.title;
 
-  const del = document.createElement("span");
-  del.className = "del";
-  del.textContent = "✖";
-
   const label = document.createElement("div");
   label.className = "label";
   label.appendChild(a);
-  label.appendChild(del);
 
   el.appendChild(dot);
   el.appendChild(label);
 
   const position = normalizedPosition(d);
   let analysis = d.analysis || null;
+  let status = d.status || (analysis ? "ready" : "pending");
+  let manualOffset = d.manualOffset || { x:0, y:0 };
+  let baseTarget = null;
+  let touchedBeforeAnalysis = false;
   const anchor = { x:0, y:0 };
 
   function render(){
@@ -498,23 +476,23 @@ function createNode(d){
   function moveTo(clientX,clientY,offsetX,offsetY){
     position.x = clamp((clientX-offsetX)/innerWidth,0.015,0.985);
     position.y = clamp((clientY-offsetY)/innerHeight,0.025,0.975);
+    if (baseTarget) manualOffset = { x:position.x-baseTarget.x, y:position.y-baseTarget.y };
+    else touchedBeforeAnalysis = true;
     render();
     scheduleLabelLayout();
   }
 
   function moveToNormalized(target){
-    position.x = clamp(target.x,0.015,0.985);
-    position.y = clamp(target.y,0.025,0.975);
+    if (touchedBeforeAnalysis && !baseTarget) {
+      manualOffset = { x:position.x-target.x, y:position.y-target.y };
+      touchedBeforeAnalysis = false;
+    }
+    baseTarget = target;
+    position.x = clamp(target.x+manualOffset.x,0.015,0.985);
+    position.y = clamp(target.y+manualOffset.y,0.025,0.975);
     render();
     scheduleLabelLayout();
   }
-
-  del.onclick = () => {
-    el.remove();
-    nodes = nodes.filter(n => n.id !== d.id);
-    scheduleLabelLayout();
-    save();
-  };
 
   let drag = false;
   let offsetX = 0;
@@ -558,6 +536,7 @@ function createNode(d){
     position,
     moveToNormalized,
     setAnalysis:value=>{ analysis = value; dot.title = "Analyzed " + (value.updated || ""); },
+    setStatus:value=>{ status = value; el.classList.remove("pending","ready","error"); el.classList.add(value); },
     anchor,
     render,
     get:()=>({
@@ -565,6 +544,8 @@ function createNode(d){
       title:d.title,
       link:d.link,
       analysis,
+      status,
+      manualOffset,
       nx:Number(position.x.toFixed(6)),
       ny:Number(position.y.toFixed(6))
     })
@@ -683,11 +664,14 @@ async function save(){
 
   savePromise = savePromise
     .catch(()=>{})
-    .then(()=>fetch("/api/save",{
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body
-    }));
+    .then(async()=>{
+      const response = await fetch("/api/save",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body
+      });
+      if (!response.ok) throw new Error("Map save failed: " + response.status);
+    });
 
   return savePromise;
 }
@@ -702,6 +686,8 @@ async function load(){
     ws.appendChild(n.el);
     nodes.push(n);
   }
+  while (nodes.length > 20) nodes.shift().el.remove();
+  if ((d.cards||[]).length > 20) await save();
 }
 
 window.addEventListener("resize",()=>{
@@ -709,7 +695,12 @@ window.addEventListener("resize",()=>{
   scheduleLabelLayout();
 });
 
-load().then(scheduleLabelLayout);
+load().then(()=>{
+  reflow();
+  for (const node of nodes.filter(n => !n.get().analysis)) {
+    analyzeNode(node).catch(error => { node.setStatus("error"); analysisStatus.textContent = error.message; });
+  }
+}).catch(error => { analysisStatus.textContent = error.message; });
 </script>
 
 </body>

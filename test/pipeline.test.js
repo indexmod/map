@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { parseArticle, canonicalURL } from '../src/article.js';
 import { analyze, runPublished } from '../src/analyze.js';
-import { schema, emptyProfile, validateProfile } from '../src/schema.js';
+import { schema, emptyProfile, validateProfile, evidenceWarnings } from '../src/schema.js';
 import { semanticPosition, ageTransform } from '../src/position.js';
 import { huggingFace } from '../src/huggingface.js';
+import { cloudflareAI } from '../src/cloudflare.js';
 const raw = '---\nupdated: "2026-09-18"\n---\nA project started in 2007.';
 test('only actual frontmatter updated, valid September date', () => {
   assert.equal(parseArticle(raw).eligible, true);
@@ -35,7 +36,7 @@ test('schema and evidence validation', async () => {
   assert.ok(validateProfile(emptyProfile(), ''));
   const p = emptyProfile(); p.subjectYear = 2007; p.evidence.subjectYear = ['started in 2007'];
   assert.ok(validateProfile(p, 'A project started in 2007.'));
-  assert.throws(() => validateProfile(p, 'unrelated'));
+  assert.deepEqual(evidenceWarnings(p, 'unrelated'), ['subjectYear: excerpt is not verbatim']);
   p.scores.commercial = 2; assert.throws(() => validateProfile(p, raw));
 });
 test('filter runs before inference; cache changes with prompt/content/model/version inputs', async () => {
@@ -63,4 +64,15 @@ test('HF request configuration and failures', async () => {
     return Response.json({ choices: [{ message: { content: JSON.stringify(emptyProfile()) }, finish_reason: 'stop' }] });
   });
   assert.deepEqual(await adapter.infer({ prompt: 'p', article: 'a', schema }), emptyProfile());
+});
+test('Cloudflare Workers AI returns structured profile', async () => {
+  let calls = 0;
+  const adapter = cloudflareAI({ AI: { run: async (model, input) => {
+    calls++;
+    assert.equal(model, '@cf/meta/llama-3.1-8b-instruct');
+    assert.equal(input.response_format.type, 'json_schema');
+    return { response: emptyProfile() };
+  } } });
+  assert.deepEqual(await adapter.infer({ prompt: 'p', article: 'a', schema }), emptyProfile());
+  assert.equal(calls, 1);
 });
