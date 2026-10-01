@@ -3,7 +3,7 @@ import { analyze, hash } from '../src/analyze.js';
 import { fetchArticle, extractPastedArticleLinks, requestedArticleURL } from '../src/article.js';
 import { huggingFace } from '../src/huggingface.js';
 import { cloudflareAI } from '../src/cloudflare.js';
-import { semanticPosition, ageTransform } from '../src/position.js';
+import { semanticPosition, ageTransform, separatePoints } from '../src/position.js';
 const MAP_GENERATION = 2;
 const MAX_CARDS = 20;
 
@@ -177,20 +177,22 @@ body{
 
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 
-@keyframes nodePulse{
-  0%,100%{transform:translateY(-2px) scale(.97);opacity:.86}
-  50%{transform:translateY(2px) scale(1.045);opacity:1}
+@keyframes calculationBlink{
+  0%,100%{opacity:1}
+  50%{opacity:.2}
 }
-.node{
-  transition:left 3.8s cubic-bezier(.22,.61,.24,1),top 3.8s cubic-bezier(.22,.61,.24,1);
-  animation:nodePulse 4.6s ease-in-out infinite;
-  transform-origin:0 0;
+.node{transform-origin:0 0}
+.node.pending .dot::before,.node.travelling .dot::before{
+  animation:calculationBlink .85s ease-in-out infinite;
 }
-.node.pending{animation-duration:1.35s}
-.node.recalculating{animation-duration:1.35s}
-.node.dragging{transition:none;animation:none;transform:none;opacity:1}
+.journey-trails{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
+.journey-trail{fill:none;stroke:#000;stroke-width:1;stroke-opacity:.2}
+.calculation-state{font-size:12px;line-height:1.3;color:#555}
+.node.dragging .dot::before{animation:none}
 .node.error .dot::before{box-shadow:0 0 0 3px #ff3b30}
-@media (prefers-reduced-motion:reduce){.node{transition:none;animation:none;transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){
+  .node.pending .dot::before,.node.travelling .dot::before{animation:none;opacity:.55}
+}
 
 .node{
   position:absolute;
@@ -295,6 +297,10 @@ body{
 
 <script>
 const ws = document.getElementById("workspace");
+const trailLayer = document.createElementNS("http://www.w3.org/2000/svg","svg");
+trailLayer.classList.add("journey-trails");
+trailLayer.setAttribute("aria-hidden","true");
+ws.appendChild(trailLayer);
 let nodes = [];
 let pasteQueue = Promise.resolve();
 let savePromise = Promise.resolve();
@@ -307,14 +313,14 @@ const analysisStatus = document.getElementById("analysis-status");
 const maxCards = ${MAX_CARDS};
 ${semanticPosition.toString()}
 ${ageTransform.toString()}
+${separatePoints.toString()}
 ${extractPastedArticleLinks.toString()}
 ${requestedArticleURL.toString()}
 
 window.addEventListener("pointermove",e=>{ lastPointer = {x:e.clientX,y:e.clientY}; },{passive:true});
 
 function updatePulse(){
-  const recalculating = pendingAnalyses > 0 || activeJourneys > 0;
-  for (const node of nodes) node.el.classList.toggle("recalculating",recalculating);
+  analysisStatus.textContent = pendingAnalyses ? "Calculating " + pendingAnalyses + " article(s)…" : activeJourneys ? "Placing points…" : "Map ready";
 }
 
 async function analyzeNode(node){
@@ -332,10 +338,13 @@ async function analyzeNode(node){
     if (analysis.status === "analyzed") {
       if (!nodes.includes(node)) return analysis;
       node.setAnalysis(analysis);
-      node.setStatus("ready");
       reflowPending = true;
     }
+    if (analysis.status !== "analyzed" && nodes.includes(node)) throw new Error(analysis.reason || "No position returned");
     return analysis;
+  } catch (error) {
+    if (nodes.includes(node)) node.setStatus("error");
+    throw error;
   } finally {
     pendingAnalyses--;
     if (pendingAnalyses === 0 && reflowPending) {
@@ -351,18 +360,111 @@ function reflow(){
   const years = nodes.map(n => n.get().analysis?.result?.subjectYear).filter(Number.isFinite);
   const oldestYear = years.length > 1 && Math.min(...years) < Math.max(...years) ? Math.min(...years) : 1900;
   const newestYear = years.length > 1 && Math.min(...years) < Math.max(...years) ? Math.max(...years) : 2026;
-  const journeys = [];
+  const targets = new Map();
   for (const node of nodes) {
     const profile = node.get().analysis?.result;
     if (!profile) continue;
     const base = semanticPosition(profile.scores);
     const target = ageTransform(base,profile.subjectYear,{oldestYear,newestYear}).position;
-    if (target) journeys.push(node.visitTarget(target));
+    if (target) targets.set(node,node.prepareTarget(target));
   }
-  if (!journeys.length) return;
+  if (!targets.size) return;
+  return animateLayout(targets);
+}
+
+// All positions remain real throughout the journey: labels, dragging and saves
+// see the same coordinates. Collision displacement never changes semantic scores.
+let motionFrame = 0;
+let finishMotion = null;
+function separateNodes(protectedNodes = new Set()){
+  const {hitSize} = dotMetrics();
+  const margin = hitSize/2+12;
+  const points = nodes.map(node=>({
+    x:node.position.x*innerWidth,y:node.position.y*innerHeight,
+    weight:node.isDragging() ? 0 : protectedNodes.has(node) ? .08 : 1
+  }));
+  separatePoints(points,{width:innerWidth,height:innerHeight,margin,distance:hitSize+12});
+  points.forEach((point,index)=>{
+    nodes[index].position.x=point.x/innerWidth;
+    nodes[index].position.y=point.y/innerHeight;
+    nodes[index].render();
+  });
+}
+
+function cancelMotion(){
+  cancelAnimationFrame(motionFrame);
+  motionFrame=0;
+  if(finishMotion){const finish=finishMotion;finishMotion=null;finish();}
+}
+
+function animateLayout(targets){
+  cancelMotion();
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const starts = new Map(nodes.map(node=>[node,{...node.position}]));
+  const revisions = new Map(nodes.map(node=>[node,node.motionRevision()]));
+  const goals = new Map(nodes.map(node=>[node,targets.get(node)||{...node.position}]));
+  const travellers = new Set([...targets.keys()].filter(node=>{
+    const goal=goals.get(node);
+    return node.get().status==="pending" || Math.hypot((goal.x-node.position.x)*innerWidth,(goal.y-node.position.y)*innerHeight)>1;
+  }));
+  const trails = new Map();
+  if(!reduced) for(const node of travellers){
+    const path=document.createElementNS("http://www.w3.org/2000/svg","polyline");
+    path.classList.add("journey-trail");
+    trailLayer.appendChild(path);
+    trails.set(node,{path,points:[]});
+  }
+  travellers.forEach(node=>node.setTravelling(true));
   activeJourneys++;
   updatePulse();
-  return Promise.allSettled(journeys).then(()=>{ activeJourneys--; updatePulse(); });
+  return new Promise(resolve=>{
+    finishMotion=()=>{
+      for(const trail of trails.values()) trail.path.remove();
+      travellers.forEach(node=>{
+        node.setTravelling(false);
+        if(node.get().status!=="error") node.setStatus("ready");
+      });
+      activeJourneys--;
+      scheduleLabelLayout();
+      updatePulse();
+      resolve();
+    };
+    let began=null;
+    let previous=null;
+    function frame(now){
+      if(began===null) began=now;
+      const elapsed=now-began;
+      const dt=Math.min(48,previous===null ? 16 : now-previous);
+      previous=now;
+      const progress=reduced ? 1 : Math.min(1,elapsed/4800);
+      // Smooth start and finish; neighbours yield along the entire path.
+      const eased=progress*progress*(3-2*progress);
+      for(const node of nodes){
+        if(node.isDragging() || !goals.has(node) || revisions.get(node)!==node.motionRevision()) continue;
+        const start=starts.get(node),goal=goals.get(node);
+        const desired={x:start.x+(goal.x-start.x)*eased,y:start.y+(goal.y-start.y)*eased};
+        const alpha=reduced ? 1 : 1-Math.exp(-dt/(travellers.has(node)?90:700));
+        node.position.x+=(desired.x-node.position.x)*alpha;
+        node.position.y+=(desired.y-node.position.y)*alpha;
+      }
+      separateNodes(travellers);
+      for(const [node,trail] of trails){
+        if(!nodes.includes(node)){trail.path.remove();continue;}
+        const point={x:node.anchor.x,y:node.anchor.y};
+        const last=trail.points[trail.points.length-1];
+        if(!last || Math.hypot(point.x-last.x,point.y-last.y)>2){
+          trail.points.push(point);
+          trail.path.setAttribute("points",trail.points.map(p=>p.x+","+p.y).join(" "));
+        }
+      }
+      scheduleLabelLayout();
+      if(reduced || elapsed>=5400){
+        motionFrame=0;
+        const finish=finishMotion;finishMotion=null;finish();
+      }else motionFrame=requestAnimationFrame(frame);
+    }
+    motionFrame=requestAnimationFrame(frame);
+  });
 }
 
 const colorAnchors = [
@@ -428,6 +530,7 @@ async function addArticle(articleURL,insertionPosition){
     ws.appendChild(node.el);
     nodes.push(node);
     while(nodes.length>maxCards) nodes.shift().el.remove();
+    separateNodes(new Set([node]));
     updatePulse();
     scheduleLabelLayout();
     const initialSave = save();
@@ -483,6 +586,12 @@ function createNode(d){
   const label = document.createElement("div");
   label.className = "label";
   label.appendChild(a);
+  const calculationState = document.createElement("span");
+  calculationState.className = "calculation-state";
+  label.appendChild(calculationState);
+  label.style.flexDirection = "column";
+  label.style.alignItems = "flex-start";
+  label.style.gap = "3px";
 
   el.appendChild(dot);
   el.appendChild(label);
@@ -491,9 +600,9 @@ function createNode(d){
   let analysis = d.analysis || null;
   let status = d.status || (analysis ? "ready" : "pending");
   let manualOffset = d.manualOffset || { x:0, y:0 };
-  let journey = null;
-  let baseTarget = null;
+  let baseTarget = d.baseTarget || null;
   let touchedBeforeAnalysis = false;
+  let motionRevision = 0;
   const anchor = { x:0, y:0 };
 
   function render(){
@@ -508,51 +617,33 @@ function createNode(d){
   }
 
   function moveTo(clientX,clientY,offsetX,offsetY){
+    motionRevision++;
     position.x = clamp((clientX-offsetX)/innerWidth,0.015,0.985);
     position.y = clamp((clientY-offsetY)/innerHeight,0.025,0.975);
     if(baseTarget) manualOffset = {x:position.x-baseTarget.x,y:position.y-baseTarget.y};
     else touchedBeforeAnalysis = true;
-    render();
+    separateNodes(new Set(nodes.filter(node=>node.el===el)));
     scheduleLabelLayout();
   }
 
-  function stopJourneyAtVisiblePosition(){
-    if(!journey) return;
-    const style = getComputedStyle(el);
-    const visibleX = parseFloat(style.left);
-    const visibleY = parseFloat(style.top);
-    journey.cancel();
-    journey = null;
-    if(Number.isFinite(visibleX) && Number.isFinite(visibleY)){
-      position.x = clamp(visibleX/innerWidth,0.015,0.985);
-      position.y = clamp(visibleY/innerHeight,0.025,0.975);
-      render();
-    }
-  }
-
-  function visitTarget(target){
-    stopJourneyAtVisiblePosition();
+  function prepareTarget(target){
     if(touchedBeforeAnalysis && !baseTarget){
       manualOffset = {x:position.x-target.x,y:position.y-target.y};
       touchedBeforeAnalysis = false;
     }
     baseTarget = target;
     const margin = dotMetrics().hitSize/2+12;
-    const destination = {
-      x:clamp((target.x+manualOffset.x)*innerWidth,margin,innerWidth-margin),
-      y:clamp((target.y+manualOffset.y)*innerHeight,margin,innerHeight-margin)
+    return {
+      x:clamp((target.x+manualOffset.x)*innerWidth,margin,innerWidth-margin)/innerWidth,
+      y:clamp((target.y+manualOffset.y)*innerHeight,margin,innerHeight-margin)/innerHeight
     };
-    const start = {x:anchor.x,y:anchor.y};
-    position.x = destination.x/innerWidth;
-    position.y = destination.y/innerHeight;
-    render();
-    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return Promise.resolve();
-    journey = el.animate([
-      {left:start.x+"px",top:start.y+"px"},
-      {left:anchor.x+"px",top:anchor.y+"px"}
-    ],{duration:4800,easing:"cubic-bezier(.22,.61,.24,1)"});
-    const current = journey;
-    return current.finished.catch(()=>{}).then(()=>{if(journey===current) journey=null;});
+  }
+
+  function setStatus(value){
+    status=value;
+    el.classList.remove("pending","ready","error");
+    el.classList.add(value);
+    calculationState.textContent=value==="pending" ? "Calculating…" : value==="error" ? "Calculation failed" : "";
   }
 
   let drag = false;
@@ -562,7 +653,6 @@ function createNode(d){
   dot.addEventListener("pointerdown",e=>{
     if(e.button!==0) return;
     e.preventDefault();
-    stopJourneyAtVisiblePosition();
     drag = true;
     offsetX = e.clientX-anchor.x;
     offsetY = e.clientY-anchor.y;
@@ -582,13 +672,15 @@ function createNode(d){
     if(dot.hasPointerCapture(e.pointerId)){
       dot.releasePointerCapture(e.pointerId);
     }
+    separateNodes();
     scheduleLabelLayout();
-    save();
+    save().catch(error=>{analysisStatus.textContent=error.message;});
   }
 
   dot.addEventListener("pointerup",finishDrag);
   dot.addEventListener("pointercancel",finishDrag);
 
+  setStatus(status);
   render();
 
   return {
@@ -596,10 +688,13 @@ function createNode(d){
     el,
     label,
     position,
-    visitTarget,
+    prepareTarget,
+    isDragging:()=>drag,
+    motionRevision:()=>motionRevision,
+    setTravelling:value=>{el.classList.toggle("travelling",value);calculationState.textContent=value?"Placing…":status==="pending"?"Calculating…":status==="error"?"Calculation failed":"";},
     setTitle:value=>{d.title=value;a.textContent=value;},
     setAnalysis:value=>{ analysis = value; dot.title = "Analyzed " + (value.updated || ""); },
-    setStatus:value=>{ status = value; el.classList.remove("pending","ready","error"); el.classList.add(value); },
+    setStatus,
     anchor,
     render,
     get:()=>({
@@ -609,6 +704,7 @@ function createNode(d){
       analysis,
       status,
       manualOffset,
+      baseTarget,
       nx:Number(position.x.toFixed(6)),
       ny:Number(position.y.toFixed(6))
     })
@@ -742,11 +838,12 @@ async function load(){
 }
 
 window.addEventListener("resize",()=>{
-  for(const node of nodes) node.render();
+  separateNodes();
   scheduleLabelLayout();
 });
 
 load().then(()=>{
+  separateNodes();
   scheduleLabelLayout();
   const articleURL = requestedArticleURL(location.search);
   if (articleURL) {
