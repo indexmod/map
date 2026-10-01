@@ -5,6 +5,7 @@ import { huggingFace } from '../src/huggingface.js';
 import { cloudflareAI } from '../src/cloudflare.js';
 import { semanticPosition, ageTransform } from '../src/position.js';
 const MAP_GENERATION = 2;
+const MAX_CARDS = 20;
 
 export default {
   async fetch(req, env) {
@@ -106,6 +107,7 @@ export default {
     if (url.pathname === "/api/save") {
       const data = await req.json();
       if (data?.generation !== MAP_GENERATION || !Array.isArray(data.cards)) return new Response('Outdated map state', { status: 409 });
+      data.cards = data.cards.slice(-MAX_CARDS);
       await env.MAP_DB.put("map_state", JSON.stringify(data));
       return Response.json({ ok: true });
     }
@@ -300,7 +302,9 @@ let mapState = {};
 let lastPointer = { x:innerWidth/2, y:innerHeight/2 };
 let pendingAnalyses = 0;
 let activeJourneys = 0;
+let reflowPending = false;
 const analysisStatus = document.getElementById("analysis-status");
+const maxCards = ${MAX_CARDS};
 ${semanticPosition.toString()}
 ${ageTransform.toString()}
 
@@ -327,12 +331,16 @@ async function analyzeNode(node){
       if (!nodes.includes(node)) return analysis;
       node.setAnalysis(analysis);
       node.setStatus("ready");
-      reflow();
+      reflowPending = true;
       await save();
     }
     return analysis;
   } finally {
     pendingAnalyses--;
+    if (pendingAnalyses === 0 && reflowPending) {
+      reflowPending = false;
+      reflow();
+    }
     updatePulse();
   }
 }
@@ -440,7 +448,7 @@ document.addEventListener("paste", async (e) => {
 
     ws.appendChild(node.el);
     nodes.push(node);
-    while (nodes.length > 20) nodes.shift().el.remove();
+    while (nodes.length > maxCards) nodes.shift().el.remove();
     updatePulse();
     scheduleLabelLayout();
     await save();
@@ -719,7 +727,7 @@ async function load(){
     ws.appendChild(n.el);
     nodes.push(n);
   }
-  while (nodes.length > 20) nodes.shift().el.remove();
+  while (nodes.length > maxCards) nodes.shift().el.remove();
   if ((d.cards||[]).length > 20) await save();
 }
 

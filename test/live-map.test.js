@@ -18,6 +18,14 @@ test('new map generation clears legacy cards once and rejects stale saves', asyn
   assert.deepEqual(JSON.parse(store.get('map_state')), loaded);
   const stale = await worker.fetch(new Request('https://map.indexmod.press/api/save', { method: 'POST', body: JSON.stringify({ cards: [{ id: 'old' }] }) }), env);
   assert.equal(stale.status, 409);
+  const cards = Array.from({ length: 21 }, (_, id) => ({ id }));
+  const saved = await worker.fetch(new Request('https://map.indexmod.press/api/save', {
+    method: 'POST', body: JSON.stringify({ generation: 2, cards })
+  }), env);
+  assert.equal(saved.status, 200);
+  const retained = JSON.parse(store.get('map_state')).cards;
+  assert.equal(retained.length, 20);
+  assert.equal(retained[0].id, 1);
 });
 test('new pasted article without September frontmatter is analyzed through Workers AI', async () => {
   const original = globalThis.fetch;
