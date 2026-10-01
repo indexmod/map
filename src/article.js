@@ -4,6 +4,22 @@ export function canonicalURL(link) {
   return `https://indexmod.press/${u.pathname.split('/').filter(Boolean)[0]}`;
 }
 
+export function extractPastedArticleLinks(text) {
+  const value = String(text || '');
+  const candidates = value.match(/https?:\/\/[^\s<>"']+/gi) || [value.trim()];
+  const links = new Set();
+  for (const candidate of candidates) {
+    try {
+      const u = new URL(candidate.replace(/[),.;!?]+$/, ''));
+      const segments = u.pathname.split('/').filter(Boolean);
+      if (u.protocol === 'https:' && u.hostname === 'indexmod.press' && segments.length === 1) {
+        links.add(`https://indexmod.press/${segments[0]}`);
+      }
+    } catch { /* Ignore non-article URLs in pasted text. */ }
+  }
+  return [...links];
+}
+
 export function parseArticle(raw) {
   if (typeof raw !== 'string') throw new Error('Source raw Markdown is missing');
   const normalized = raw.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');

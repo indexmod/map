@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { parseArticle, canonicalURL } from '../src/article.js';
+import { parseArticle, canonicalURL, extractPastedArticleLinks } from '../src/article.js';
 import { analyze, runPublished } from '../src/analyze.js';
 import { schema, emptyProfile, validateProfile, evidenceWarnings } from '../src/schema.js';
 import { semanticPosition, ageTransform } from '../src/position.js';
@@ -20,6 +20,12 @@ test('cleaning excludes service sections and retains later article sections', ()
 test('canonical URL blocks offsite and deduplicates tracking', () => {
   assert.equal(canonicalURL('https://indexmod.press/a?utm=x#foo'), 'https://indexmod.press/a');
   for (const u of ['https://indexmod.press.evil/a', 'http://indexmod.press/a', 'https://indexmod.press/a/b']) assert.throws(() => canonicalURL(u));
+});
+test('paste parser accepts multiple links and ignores duplicates and non-articles', () => {
+  assert.deepEqual(extractPastedArticleLinks('https://indexmod.press/a?utm=x\nhttps://indexmod.press/b\nhttps://indexmod.press/a#top\nhttps://example.com/c'), [
+    'https://indexmod.press/a', 'https://indexmod.press/b'
+  ]);
+  assert.deepEqual(extractPastedArticleLinks('https://indexmod.press/a/b'), []);
 });
 test('age never collapses a noncentral vector; unknown year is identity', () => {
   const p = semanticPosition({ institutional: 1, underground: 0, commercial: 0, experimental: 0 });

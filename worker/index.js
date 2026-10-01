@@ -1,6 +1,6 @@
 import prompt from '../prompts/map-semantic.md';
 import { analyze, hash } from '../src/analyze.js';
-import { fetchArticle } from '../src/article.js';
+import { fetchArticle, extractPastedArticleLinks } from '../src/article.js';
 import { huggingFace } from '../src/huggingface.js';
 import { cloudflareAI } from '../src/cloudflare.js';
 import { semanticPosition, ageTransform } from '../src/position.js';
@@ -288,7 +288,7 @@ body{
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='black'/%3E%3Ccircle cx='11' cy='13' r='2' fill='white'/%3E%3Ccircle cx='21' cy='13' r='2' fill='white'/%3E%3Crect x='12' y='20' width='8' height='2' rx='1' fill='white'/%3E%3C/svg%3E">
 </head>
 
-<body>
+<body tabindex="0">
 <img class="sphere-logo" src="https://indexmod.press/logo.svg" alt="Indexmod" aria-hidden="true">
 <div id="workspace"></div>
 <output id="analysis-status" class="sr-only" aria-live="polite"></output>
@@ -296,7 +296,7 @@ body{
 <script>
 const ws = document.getElementById("workspace");
 let nodes = [];
-let busy = false;
+let pasteQueue = Promise.resolve();
 let savePromise = Promise.resolve();
 let mapState = {};
 let lastPointer = { x:innerWidth/2, y:innerHeight/2 };
@@ -307,6 +307,7 @@ const analysisStatus = document.getElementById("analysis-status");
 const maxCards = ${MAX_CARDS};
 ${semanticPosition.toString()}
 ${ageTransform.toString()}
+${extractPastedArticleLinks.toString()}
 
 window.addEventListener("pointermove",e=>{ lastPointer = {x:e.clientX,y:e.clientY}; },{passive:true});
 
@@ -416,54 +417,49 @@ function colorAt(x,y){
 // =====================
 // PASTE
 // =====================
-document.addEventListener("paste", async (e) => {
-  const text = e.clipboardData.getData("text").trim();
-  let articleURL;
-  try {
-    const u = new URL(text);
-    const segments = u.pathname.split("/").filter(Boolean);
-    if (u.protocol !== "https:" || u.hostname !== "indexmod.press" || segments.length !== 1) return;
-    articleURL = u.origin + "/" + segments[0];
-  } catch { return; }
-  if (busy) return;
-  if (nodes.some(node => node.get().link === articleURL)) {
-    analysisStatus.textContent = "This article is already on the map";
-    return;
-  }
-
-  const insertionPosition = cursorPosition();
-  busy = true;
-
-  try {
-    const r = await fetch("/api/title?url=" + encodeURIComponent(articleURL));
-    const meta = await r.json();
-
+async function addArticle(articleURL,insertionPosition){
+  if(nodes.some(node=>node.get().link===articleURL)) return;
+  try{
     const node = createNode({
-      id: crypto.randomUUID(),
-      title: meta.title || "Untitled",
-      link: articleURL,
-      status: "pending",
-      ...insertionPosition
+      id:crypto.randomUUID(),title:articleURL.split("/").pop(),link:articleURL,
+      status:"pending",...insertionPosition
     });
-
     ws.appendChild(node.el);
     nodes.push(node);
-    while (nodes.length > maxCards) nodes.shift().el.remove();
+    while(nodes.length>maxCards) nodes.shift().el.remove();
     updatePulse();
     scheduleLabelLayout();
-    await save();
-    analysisStatus.textContent = "Analyzing " + node.get().title;
-    analyzeNode(node).then(result => {
-      analysisStatus.textContent = result?.targetPosition ? "Placed " + node.get().title : "No position for " + node.get().title;
-    }).catch(error => {
+    const initialSave = save();
+    const titleRequest = fetch("/api/title?url="+encodeURIComponent(articleURL))
+      .then(response=>response.ok?response.json():null).catch(()=>null);
+    analyzeNode(node).catch(error=>{
       node.setStatus("error");
-      analysisStatus.textContent = error.message;
+      analysisStatus.textContent=error.message;
     });
+    titleRequest.then(meta=>{
+      if(meta?.title && nodes.includes(node)){
+        node.setTitle(meta.title);
+        scheduleLabelLayout();
+        save().catch(error=>{analysisStatus.textContent=error.message;});
+      }
+    });
+    await initialSave;
+  }catch(error){
+    analysisStatus.textContent=error.message;
+  }
+}
 
-  } catch (error) {
-    analysisStatus.textContent = error.message;
-  } finally {
-    busy = false;
+document.body.focus({preventScroll:true});
+document.body.addEventListener("pointerdown",e=>{
+  if(e.target instanceof Element && !e.target.closest("a")) document.body.focus({preventScroll:true});
+});
+document.addEventListener("paste",e=>{
+  const links = extractPastedArticleLinks(e.clipboardData?.getData("text")||"");
+  if(!links.length) return;
+  e.preventDefault();
+  const insertionPosition = cursorPosition();
+  for(const link of links){
+    pasteQueue = pasteQueue.then(()=>addArticle(link,insertionPosition));
   }
 });
 
@@ -588,6 +584,7 @@ function createNode(d){
     label,
     position,
     visitTarget,
+    setTitle:value=>{d.title=value;a.textContent=value;},
     setAnalysis:value=>{ analysis = value; dot.title = "Analyzed " + (value.updated || ""); },
     setStatus:value=>{ status = value; el.classList.remove("pending","ready","error"); el.classList.add(value); },
     anchor,
