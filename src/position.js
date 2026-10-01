@@ -17,11 +17,10 @@ export function ageTransform(position, year, { oldestYear = 1900, newestYear = 2
 // Pixel-space projection keeps hit areas apart, including at viewport edges.
 // Lower weights yield less; a dragged point has weight zero.
 export function separatePoints(points, { width, height, margin, distance }) {
-  const bound = point => {
+  for (const point of points) {
     point.x = Math.max(margin, Math.min(Math.max(margin, width - margin), point.x));
     point.y = Math.max(margin, Math.min(Math.max(margin, height - margin), point.y));
-  };
-  points.forEach(bound);
+  }
   for (let pass = 0; pass < 100; pass++) {
     let overlap = 0;
     for (let i = 0; i < points.length; i++) {
@@ -42,7 +41,10 @@ export function separatePoints(points, { width, height, margin, distance }) {
         a.y -= dy * push * wa / (wa + wb);
         b.x += dx * push * wb / (wa + wb);
         b.y += dy * push * wb / (wa + wb);
-        bound(a); bound(b);
+        for (const point of [a, b]) {
+          point.x = Math.max(margin, Math.min(Math.max(margin, width - margin), point.x));
+          point.y = Math.max(margin, Math.min(Math.max(margin, height - margin), point.y));
+        }
       }
     }
     if (overlap < .05) break;

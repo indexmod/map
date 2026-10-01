@@ -186,7 +186,7 @@ body{
   animation:calculationBlink .85s ease-in-out infinite;
 }
 .journey-trails{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
-.journey-trail{fill:none;stroke:#000;stroke-width:1;stroke-opacity:.2}
+.journey-trail{fill:none;stroke:#000;stroke-width:2;stroke-opacity:.45}
 .calculation-state{font-size:12px;line-height:1.3;color:#555}
 .node.dragging .dot::before{animation:none}
 .node.error .dot::before{box-shadow:0 0 0 3px #ff3b30}
@@ -254,6 +254,7 @@ body{
   gap:12px;
   width:max-content;
   max-width:var(--label-width);
+
 }
 
 .label a{
@@ -744,7 +745,7 @@ function scheduleLabelLayout(){
 function layoutLabels(){
   const {size,hitSize,gap} = dotMetrics();
   const margin = 12;
-  const separation = 16;
+  const separation = 12;
   const placedLabels = [];
   const dots = nodes.map(node=>({
     left:node.anchor.x-hitSize/2-6,
@@ -761,9 +762,10 @@ function layoutLabels(){
   for(const node of ordered){
     const {width,height} = labelSizes.get(node);
     const {x,y} = node.anchor;
-    const radius = size/2+gap;
+    const radius = Math.max(size/2+gap,hitSize/2+12);
     const ownDot = {left:x-radius,right:x+radius,top:y-radius,bottom:y+radius};
-    const obstacles = [...dots,ownDot,...placedLabels];
+    const dotObstacles = [...dots,ownDot];
+    const obstacles = [...dotObstacles,...placedLabels];
     const xs = [x+radius,x-radius-width,x-width/2,margin,innerWidth-margin-width];
     const ys = [y-height/2,y+radius,y-radius-height,margin,innerHeight-margin-height];
     for(const obstacle of obstacles){
@@ -778,9 +780,10 @@ function layoutLabels(){
     let bestRect;
     let bestScore = Infinity;
 
-    for(const left of xPositions){
+    candidateSearch: for(const left of xPositions){
       for(const top of yPositions){
         const rect = {left,top,right:left+width,bottom:top+height};
+        if (dotObstacles.some(obstacle=>overlapArea(rect,obstacle)>0)) continue;
         const overlap = obstacles.reduce((sum,obstacle)=>sum+overlapArea(rect,obstacle),0);
         const distance = Math.hypot(clamp(x,rect.left,rect.right)-x,clamp(y,rect.top,rect.bottom)-y);
         const alignment = Math.abs(top+height/2-y)*0.1+(left<x ? 0.5 : 0);
@@ -789,9 +792,24 @@ function layoutLabels(){
           bestScore=score;
           bestRect=rect;
         }
+        if(overlap===0) break candidateSearch;
       }
     }
 
+    // Never fall back to a rectangle over a point. Search the full viewport
+    // when crowded local candidates have no safe position.
+    if(!bestRect){
+      for(let top=margin;top<=innerHeight-margin-height;top+=16){
+        for(let left=margin;left<=innerWidth-margin-width;left+=16){
+          const rect={left,top,right:left+width,bottom:top+height};
+          if(dotObstacles.some(obstacle=>overlapArea(rect,obstacle)>0)) continue;
+          const score=placedLabels.reduce((sum,obstacle)=>sum+overlapArea(rect,obstacle),0)*10000+Math.hypot(left-x,top-y);
+          if(score<bestScore){bestScore=score;bestRect=rect;}
+        }
+      }
+    }
+    if(!bestRect){node.label.style.visibility="hidden";continue;}
+    node.label.style.visibility="visible";
     node.label.style.left = (bestRect.left-x)+"px";
     node.label.style.top = (bestRect.top-y)+"px";
     placedLabels.push({

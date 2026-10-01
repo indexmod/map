@@ -6,7 +6,8 @@ import { semanticPosition, ageTransform, separatePoints } from '../src/position.
 import { extractPastedArticleLinks, requestedArticleURL } from '../src/article.js';
 
 const worker = await readFile(new URL('../worker/index.js', import.meta.url), 'utf8');
-const script = worker.slice(worker.indexOf('<script>') + 8, worker.indexOf('</script>'))
+const pageSource = process.env.MAP_CLIENT_HTML_PATH ? await readFile(process.env.MAP_CLIENT_HTML_PATH, 'utf8') : worker;
+const script = pageSource.slice(pageSource.indexOf('<script>') + 8, pageSource.indexOf('</script>'))
   .replace('${MAX_CARDS}', '20')
   .replace('${semanticPosition.toString()}', semanticPosition.toString())
   .replace('${ageTransform.toString()}', ageTransform.toString())
@@ -105,5 +106,34 @@ test('reduced motion settles in one frame; dragging during travel preserves the 
     }else assert.ok(Math.abs(c.run('nodes[0].anchor.x')-700)<.1);
     await c.context.journey;
     assert.equal(c.run('activeJourneys'),0);
+  }
+});
+
+
+test('labels stay clear of every circle before, during and after travel', async () => {
+  for(const width of [390,1440]){
+    const c=client(width);
+    c.run(`for(let i=0;i<20;i++){
+      const n=createNode({id:String(i),title:'Article '+i,link:'https://indexmod.press/article-'+i,status:'ready',nx:.4+(i%5)*.02,ny:.4+Math.floor(i/5)*.02});
+      nodes.push(n);ws.appendChild(n.el);
+    }
+    separateNodes();layoutLabels();
+    globalThis.journey=animateLayout(new Map([[nodes[19],nodes[19].prepareTarget({x:.5,y:.5})]]));`);
+    for(const time of [0,2700,5500,5600]){
+      c.frame(time);
+      c.run('layoutLabels()');
+      const geometry=c.run(`nodes.map(n=>({dot:{x:n.anchor.x,y:n.anchor.y},label:{x:n.anchor.x+parseFloat(n.label.style.left),y:n.anchor.y+parseFloat(n.label.style.top),width:n.label.offsetWidth,height:n.label.offsetHeight},hidden:n.label.style.visibility==='hidden'}))`);
+      for(const entry of geometry){
+        assert.ok(!entry.hidden, 'a label should be visible');
+        for(const other of geometry){
+          const r=width<600?32:26;
+          const rect=entry.label;
+          const dx=Math.max(0,Math.min(rect.x+rect.width,other.dot.x+r)-Math.max(rect.x,other.dot.x-r));
+          const dy=Math.max(0,Math.min(rect.y+rect.height,other.dot.y+r)-Math.max(rect.y,other.dot.y-r));
+          assert.equal(dx*dy,0);
+        }
+      }
+    }
+    await c.context.journey;
   }
 });

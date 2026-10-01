@@ -28,6 +28,11 @@ jobs:
         run: node scripts/prepare-kv.mjs
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Test source and deployed client bundle
+        run: |
+          npm test
+          npx wrangler deploy --dry-run --outdir /tmp/map-bundle
+          node scripts/check-bundled-client.mjs /tmp/map-bundle/index.js
       - name: Deploy Worker and custom domain
         run: npx wrangler deploy
         env:
