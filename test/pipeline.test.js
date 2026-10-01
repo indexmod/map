@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { parseArticle, canonicalURL, extractPastedArticleLinks } from '../src/article.js';
+import { parseArticle, canonicalURL, extractPastedArticleLinks, requestedArticleURL } from '../src/article.js';
 import { analyze, runPublished } from '../src/analyze.js';
 import { schema, emptyProfile, validateProfile, evidenceWarnings } from '../src/schema.js';
 import { semanticPosition, ageTransform } from '../src/position.js';
@@ -26,6 +26,13 @@ test('paste parser accepts multiple links and ignores duplicates and non-article
     'https://indexmod.press/a', 'https://indexmod.press/b'
   ]);
   assert.deepEqual(extractPastedArticleLinks('https://indexmod.press/a/b'), []);
+});
+test('Map deep link accepts only an Indexmod article URL', () => {
+  const article = 'https://indexmod.press/тема';
+  assert.equal(requestedArticleURL(`?add=${encodeURIComponent(article)}`), 'https://indexmod.press/%D1%82%D0%B5%D0%BC%D0%B0');
+  assert.equal(requestedArticleURL('?add=https%3A%2F%2Fevil.test%2Ftopic'), null);
+  assert.equal(requestedArticleURL('?add=https%3A%2F%2Findexmod.press%2Fa%2Fb'), null);
+  assert.equal(requestedArticleURL(''), null);
 });
 test('age never collapses a noncentral vector; unknown year is identity', () => {
   const p = semanticPosition({ institutional: 1, underground: 0, commercial: 0, experimental: 0 });

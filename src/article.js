@@ -20,6 +20,11 @@ export function extractPastedArticleLinks(text) {
   return [...links];
 }
 
+export function requestedArticleURL(search) {
+  const [link] = extractPastedArticleLinks(new URLSearchParams(search).get('add') || '');
+  return link || null;
+}
+
 export function parseArticle(raw) {
   if (typeof raw !== 'string') throw new Error('Source raw Markdown is missing');
   const normalized = raw.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');

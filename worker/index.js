@@ -1,6 +1,6 @@
 import prompt from '../prompts/map-semantic.md';
 import { analyze, hash } from '../src/analyze.js';
-import { fetchArticle, extractPastedArticleLinks } from '../src/article.js';
+import { fetchArticle, extractPastedArticleLinks, requestedArticleURL } from '../src/article.js';
 import { huggingFace } from '../src/huggingface.js';
 import { cloudflareAI } from '../src/cloudflare.js';
 import { semanticPosition, ageTransform } from '../src/position.js';
@@ -308,6 +308,7 @@ const maxCards = ${MAX_CARDS};
 ${semanticPosition.toString()}
 ${ageTransform.toString()}
 ${extractPastedArticleLinks.toString()}
+${requestedArticleURL.toString()}
 
 window.addEventListener("pointermove",e=>{ lastPointer = {x:e.clientX,y:e.clientY}; },{passive:true});
 
@@ -747,6 +748,10 @@ window.addEventListener("resize",()=>{
 
 load().then(()=>{
   scheduleLabelLayout();
+  const articleURL = requestedArticleURL(location.search);
+  if (articleURL) {
+    pasteQueue = pasteQueue.then(()=>addArticle(articleURL,cursorPosition()));
+  }
   for (const node of nodes.filter(n => !n.get().analysis)) {
     analyzeNode(node).catch(error => { node.setStatus("error"); analysisStatus.textContent = error.message; });
   }
