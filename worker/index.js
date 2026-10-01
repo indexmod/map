@@ -333,14 +333,14 @@ async function analyzeNode(node){
       node.setAnalysis(analysis);
       node.setStatus("ready");
       reflowPending = true;
-      await save();
     }
     return analysis;
   } finally {
     pendingAnalyses--;
     if (pendingAnalyses === 0 && reflowPending) {
       reflowPending = false;
-      reflow();
+      await reflow();
+      await save();
     }
     updatePulse();
   }
@@ -361,7 +361,7 @@ function reflow(){
   if (!journeys.length) return;
   activeJourneys++;
   updatePulse();
-  Promise.allSettled(journeys).then(()=>{ activeJourneys--; updatePulse(); });
+  return Promise.allSettled(journeys).then(()=>{ activeJourneys--; updatePulse(); });
 }
 
 const colorAnchors = [
@@ -491,6 +491,8 @@ function createNode(d){
   let status = d.status || (analysis ? "ready" : "pending");
   let manualOffset = d.manualOffset || { x:0, y:0 };
   let journey = null;
+  let baseTarget = null;
+  let touchedBeforeAnalysis = false;
   const anchor = { x:0, y:0 };
 
   function render(){
@@ -507,6 +509,8 @@ function createNode(d){
   function moveTo(clientX,clientY,offsetX,offsetY){
     position.x = clamp((clientX-offsetX)/innerWidth,0.015,0.985);
     position.y = clamp((clientY-offsetY)/innerHeight,0.025,0.975);
+    if(baseTarget) manualOffset = {x:position.x-baseTarget.x,y:position.y-baseTarget.y};
+    else touchedBeforeAnalysis = true;
     render();
     scheduleLabelLayout();
   }
@@ -527,17 +531,25 @@ function createNode(d){
 
   function visitTarget(target){
     stopJourneyAtVisiblePosition();
-    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return Promise.resolve();
+    if(touchedBeforeAnalysis && !baseTarget){
+      manualOffset = {x:position.x-target.x,y:position.y-target.y};
+      touchedBeforeAnalysis = false;
+    }
+    baseTarget = target;
     const margin = dotMetrics().hitSize/2+12;
     const destination = {
-      x:clamp(target.x*innerWidth,margin,innerWidth-margin),
-      y:clamp(target.y*innerHeight,margin,innerHeight-margin)
+      x:clamp((target.x+manualOffset.x)*innerWidth,margin,innerWidth-margin),
+      y:clamp((target.y+manualOffset.y)*innerHeight,margin,innerHeight-margin)
     };
+    const start = {x:anchor.x,y:anchor.y};
+    position.x = destination.x/innerWidth;
+    position.y = destination.y/innerHeight;
+    render();
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return Promise.resolve();
     journey = el.animate([
-      {left:anchor.x+"px",top:anchor.y+"px",offset:0},
-      {left:destination.x+"px",top:destination.y+"px",offset:.5},
-      {left:anchor.x+"px",top:anchor.y+"px",offset:1}
-    ],{duration:7600,easing:"ease-in-out"});
+      {left:start.x+"px",top:start.y+"px"},
+      {left:anchor.x+"px",top:anchor.y+"px"}
+    ],{duration:4800,easing:"cubic-bezier(.22,.61,.24,1)"});
     const current = journey;
     return current.finished.catch(()=>{}).then(()=>{if(journey===current) journey=null;});
   }
