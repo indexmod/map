@@ -56,7 +56,7 @@ function client(width, reduced = false) {
   } };
 }
 
-test('client blinks while inference waits, then moves without overlap and saves ready positions', async () => {
+test('client shows calculation state, then moves without overlap and saves ready positions', async () => {
   for (const width of [390, 1440]) {
     const c = client(width);
     let finishInference;
@@ -72,7 +72,7 @@ test('client blinks while inference waits, then moves without overlap and saves 
       globalThis.analysisPromise=analyzeNode(nodes[1]);`);
     assert.equal(c.run('nodes[1].get().status'), 'pending');
     assert.equal(c.run('nodes[1].label.children[1].textContent'), 'Calculating…');
-    assert.match(worker, /animation:calculationBlink/);
+    assert.doesNotMatch(worker, /animation:calculationBlink|blur\(/);
     finishInference();
     for(let i=0;i<12;i++) await Promise.resolve();
     assert.equal(c.run('activeJourneys'), 1);

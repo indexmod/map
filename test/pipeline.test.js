@@ -48,7 +48,7 @@ test('orbital positions form distinct rings around the centre', () => {
   const points = Array.from({ length: 10 }, (_, index) => orbitalPosition(index, 10, { width: 1440, height: 900 }));
   const radii = points.map(({ x, y }) => Math.hypot((x - .5) * 1440, (y - .5) * 900));
   assert.equal(new Set(radii.map(radius => radius.toFixed(4))).size, 10);
-  assert.ok(radii.every(radius => radius > 250 && radius < 450));
+  assert.ok(radii.every(radius => radius > 180 && radius < 450));
   assert.equal(orbitalPosition(10, 10, { width: 1440, height: 900 }), null);
 });
 test('schema and evidence validation', async () => {

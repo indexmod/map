@@ -17,26 +17,27 @@ export function ageTransform(position, year, { oldestYear = 1900, newestYear = 2
 // Put every card on a distinct ring around the fixed centre mark. The radii
 // are deliberately based on the viewport rather than semantic coordinates so
 // a new card cannot pull the existing orbit system back into the centre.
-export function orbitalPosition(index, count, { width, height, hitSize = 52, margin = 12, logoRatio = 0.35 } = {}) {
+export function orbitalPosition(index, count, { width, height, hitSize = 52, margin = 12, logoRatio = 0.18 } = {}) {
   const orbit = orbitalParameters(index, count, { width, height, hitSize, margin, logoRatio });
   return orbit ? orbitalPoint(orbit, 0, { width, height }) : null;
 }
 
 // A stable orbital system: each card gets its own radius, tilt, phase and
 // angular velocity. The 2D projection is kept for saved state and tests.
-export function orbitalParameters(index, count, { width, height, hitSize = 52, margin = 12, logoRatio = 0.35 } = {}) {
+export function orbitalParameters(index, count, { width, height, hitSize = 52, margin = 12, logoRatio = 0.18 } = {}) {
   if (!Number.isInteger(index) || !Number.isInteger(count) || index < 0 || index >= count || width <= 0 || height <= 0) return null;
   const shortSide = Math.min(width, height);
   const edgeRadius = shortSide / 2 - hitSize / 2 - margin;
   const logoRadius = shortSide * logoRatio;
-  const innerRadius = Math.min(logoRadius + hitSize / 2 + 24, edgeRadius);
+  const innerRadius = Math.min(logoRadius + hitSize / 2 + 30, edgeRadius);
   const outerRadius = Math.max(innerRadius, edgeRadius);
-  const fraction = (index + 1) / (count + 1);
+  const fraction = count === 1 ? .5 : index / (count - 1);
   return {
     radius: innerRadius + (outerRadius - innerRadius) * fraction,
     phase: -Math.PI / 2 + index * 2.399963229728653,
-    tilt: -0.58 + (index % 5) * 0.29,
-    depth: Math.min(150, shortSide * 0.22) * (0.72 + (index % 3) * 0.12),
+    // One shared plane keeps the rings nested instead of crossing one another.
+    tilt: 0.2,
+    depth: Math.min(100, shortSide * 0.14),
     // Inner planets move faster, like a compact orbital version of Kepler's law.
     speed: 0.00022 + 0.00011 / Math.sqrt(1 + fraction * 3),
     width,

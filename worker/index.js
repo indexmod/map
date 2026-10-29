@@ -158,22 +158,22 @@ body{
   position:fixed;
   left:50%;
   top:50%;
-  width:min(70vw,70vh);
-  height:min(70vw,70vh);
-  max-width:70vw;
-  max-height:70vh;
+  width:min(38vw,38vh);
+  height:min(38vw,38vh);
+  max-width:38vw;
+  max-height:38vh;
   transform:translate(-50%,-50%);
   z-index:0;
   pointer-events:none;
   user-select:none;
   -webkit-user-drag:none;
   border-radius:50%;
-  background:radial-gradient(circle at 32% 28%,#fff 0,#e9e9e9 18%,#9a9a9a 58%,#222 100%);
-  box-shadow:inset -26px -24px 42px rgba(0,0,0,.48),inset 18px 16px 30px rgba(255,255,255,.75),0 18px 45px rgba(0,0,0,.22);
+  background:linear-gradient(145deg,#d0d0d0 0%,#b8b8b8 52%,#858585 100%);
+  border:1px solid #8a8a8a;
   transform-style:preserve-3d;
 }
 
-.sphere-logo img{width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 2px 2px rgba(0,0,0,.28))}
+.sphere-logo img{width:100%;height:100%;object-fit:contain;filter:none}
 
 #workspace{
   position:fixed;
@@ -185,35 +185,18 @@ body{
   transform-style:preserve-3d;
 }
 
-#workspace::before{
-  content:"";
-  position:absolute;
-  inset:0;
-  pointer-events:none;
-  background:radial-gradient(circle at 50% 50%,rgba(255,255,255,.7),rgba(255,255,255,0) 52%);
-}
-
 .orbit-layer{position:absolute;inset:0;transform-style:preserve-3d;pointer-events:none}
-.orbit-ring{position:absolute;left:50%;top:50%;border:1px solid rgba(0,0,0,.12);border-radius:50%;transform-style:preserve-3d;pointer-events:none}
+.orbit-ring{position:absolute;left:50%;top:50%;border:1px solid rgba(0,0,0,.22);border-radius:50%;transform-style:preserve-3d;pointer-events:none}
 
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 
-@keyframes calculationBlink{
-  0%,100%{opacity:1}
-  50%{opacity:.2}
-}
 .node{transform-origin:0 0}
-.node.pending .dot::before,.node.travelling .dot::before{
-  animation:calculationBlink .85s ease-in-out infinite;
-}
 .journey-trails{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
-.journey-trail{fill:none;stroke:#000;stroke-width:2;stroke-opacity:.45}
+.journey-trail{fill:none;stroke:#000;stroke-width:2;stroke-opacity:1}
 .calculation-state{font-size:12px;line-height:1.3;color:#555}
+.title{text-shadow:none}
 .node.dragging .dot::before{animation:none}
-.node.error .dot::before{box-shadow:0 0 0 3px #ff3b30}
-@media (prefers-reduced-motion:reduce){
-  .node.pending .dot::before,.node.travelling .dot::before{animation:none;opacity:.55}
-}
+.node.error .dot::before{outline:3px solid #ff3b30}
 
 .node{
   position:absolute;
@@ -251,7 +234,7 @@ body{
   background:currentColor;
   transform:translate(-50%,-50%);
   pointer-events:none;
-  box-shadow:0 0 18px currentColor;
+  box-shadow:none;
 }
 
 .node.dragging{
@@ -819,7 +802,7 @@ function scheduleLabelLayout(){
 function layoutLabels(){
   const {size,hitSize,gap} = dotMetrics();
   const margin = 12;
-  const separation = 12;
+  const separation = 18;
   const placedLabels = [];
   const dots = nodes.map(node=>({
     left:node.anchor.x-hitSize/2-6,
@@ -836,7 +819,7 @@ function layoutLabels(){
   for(const node of ordered){
     const {width,height} = labelSizes.get(node);
     const {x,y} = node.anchor;
-    const radius = Math.max(size/2+gap,hitSize/2+12);
+    const radius = Math.max(size/2+gap+12,hitSize/2+26);
     const ownDot = {left:x-radius,right:x+radius,top:y-radius,bottom:y+radius};
     const dotObstacles = [...dots,ownDot];
     const obstacles = [...dotObstacles,...placedLabels];
