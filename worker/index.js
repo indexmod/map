@@ -129,7 +129,7 @@ ${GA_MEASUREMENT_ID ? `<script async src="https://www.googletagmanager.com/gtag/
 :root{
   color-scheme:light;
   --dot-size:36px;
-  --hit-size:52px;
+  --hit-size:76px;
   --label-gap:22px;
   --label-width:min(42vw,420px);
   --label-size:16px;
@@ -273,7 +273,7 @@ body{
 @media (max-width:600px), (pointer:coarse){
   :root{
     --dot-size:48px;
-    --hit-size:64px;
+    --hit-size:92px;
     --label-gap:24px;
     --label-size:clamp(17px,4.8vw,20px);
   }

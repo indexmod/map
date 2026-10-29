@@ -39,7 +39,7 @@ export function orbitalParameters(index, count, { width, height, hitSize = 52, m
     tilt: 0.2,
     depth: Math.min(100, shortSide * 0.14),
     // Inner planets move faster, like a compact orbital version of Kepler's law.
-    speed: 0.00022 + 0.00011 / Math.sqrt(1 + fraction * 3),
+    speed: 0.000075 + 0.00004 / Math.sqrt(1 + fraction * 3),
     width,
     height
   };
