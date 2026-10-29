@@ -850,11 +850,13 @@ function layoutLabels(){
   for(const node of ordered){
     const {width,height} = labelSizes.get(node);
     const {x,y} = node.anchor;
-    const radius = Math.max(size/2+gap+15,hitSize/2+29);
+    // The title starts three pixels beyond the visible circle edge, not from
+    // the centre or from the larger invisible pointer hit area.
+    const radius = size/2 + 3;
     const ownDot = {left:x-radius,right:x+radius,top:y-radius,bottom:y+radius};
     const dotObstacles = [...dots,ownDot];
     const obstacles = [...dotObstacles,...placedLabels];
-    const xs = [x+radius,x-radius-width,x-width/2,margin,innerWidth-margin-width];
+    const xs = [x+radius,x-radius-width,margin,innerWidth-margin-width];
     const ys = [y-height/2,y+radius,y-radius-height,margin,innerHeight-margin-height];
     for(const obstacle of obstacles){
       xs.push(obstacle.left-width,obstacle.right);
