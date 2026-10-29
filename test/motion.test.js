@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
-import { semanticPosition, ageTransform, orbitalPosition, separatePoints } from '../src/position.js';
+import { semanticPosition, ageTransform, orbitalPosition, orbitalParameters, orbitalPoint, separatePoints } from '../src/position.js';
 import { extractPastedArticleLinks, requestedArticleURL } from '../src/article.js';
 
 const worker = await readFile(new URL('../worker/index.js', import.meta.url), 'utf8');
@@ -12,6 +12,8 @@ const script = pageSource.slice(pageSource.lastIndexOf('<script>') + 8, pageSour
   .replace('${semanticPosition.toString()}', semanticPosition.toString())
   .replace('${ageTransform.toString()}', ageTransform.toString())
   .replace('${orbitalPosition.toString()}', orbitalPosition.toString())
+  .replace('${orbitalParameters.toString()}', orbitalParameters.toString())
+  .replace('${orbitalPoint.toString()}', orbitalPoint.toString())
   .replace('${separatePoints.toString()}', separatePoints.toString())
   .replace('${extractPastedArticleLinks.toString()}', extractPastedArticleLinks.toString())
   .replace('${requestedArticleURL.toString()}', requestedArticleURL.toString());

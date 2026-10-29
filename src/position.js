@@ -18,6 +18,48 @@ export function ageTransform(position, year, { oldestYear = 1900, newestYear = 2
 // are deliberately based on the viewport rather than semantic coordinates so
 // a new card cannot pull the existing orbit system back into the centre.
 export function orbitalPosition(index, count, { width, height, hitSize = 52, margin = 12, logoRatio = 0.35 } = {}) {
+  const orbit = orbitalParameters(index, count, { width, height, hitSize, margin, logoRatio });
+  return orbit ? orbitalPoint(orbit, 0, { width, height }) : null;
+}
+
+// A stable orbital system: each card gets its own radius, tilt, phase and
+// angular velocity. The 2D projection is kept for saved state and tests.
+export function orbitalParameters(index, count, { width, height, hitSize = 52, margin = 12, logoRatio = 0.35 } = {}) {
+  if (!Number.isInteger(index) || !Number.isInteger(count) || index < 0 || index >= count || width <= 0 || height <= 0) return null;
+  const shortSide = Math.min(width, height);
+  const edgeRadius = shortSide / 2 - hitSize / 2 - margin;
+  const logoRadius = shortSide * logoRatio;
+  const innerRadius = Math.min(logoRadius + hitSize / 2 + 24, edgeRadius);
+  const outerRadius = Math.max(innerRadius, edgeRadius);
+  const fraction = (index + 1) / (count + 1);
+  return {
+    radius: innerRadius + (outerRadius - innerRadius) * fraction,
+    phase: -Math.PI / 2 + index * 2.399963229728653,
+    tilt: -0.58 + (index % 5) * 0.29,
+    depth: Math.min(150, shortSide * 0.22) * (0.72 + (index % 3) * 0.12),
+    // Inner planets move faster, like a compact orbital version of Kepler's law.
+    speed: 0.00022 + 0.00011 / Math.sqrt(1 + fraction * 3),
+    width,
+    height
+  };
+}
+
+export function orbitalPoint(orbit, time = 0, { width = orbit?.width, height = orbit?.height } = {}) {
+  if (!orbit || !(width > 0) || !(height > 0)) return null;
+  const angle = orbit.phase + time * orbit.speed;
+  const x = width / 2 + Math.cos(angle) * orbit.radius;
+  const flatY = Math.sin(angle) * orbit.radius;
+  const y = height / 2 + flatY * Math.cos(orbit.tilt);
+  const z = Math.sin(angle) * orbit.radius * Math.sin(orbit.tilt) + Math.cos(angle * 2) * orbit.depth * 0.18;
+  return {
+    x: Math.max(0.015, Math.min(0.985, x / width)),
+    y: Math.max(0.025, Math.min(0.975, y / height)),
+    z
+  };
+}
+
+/* Legacy 2D projection helper. */
+function legacyOrbitalPosition(index, count, { width, height, hitSize = 52, margin = 12, logoRatio = 0.35 } = {}) {
   if (!Number.isInteger(index) || !Number.isInteger(count) || index < 0 || index >= count || width <= 0 || height <= 0) return null;
   const centreX = width / 2;
   const centreY = height / 2;

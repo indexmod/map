@@ -3,7 +3,7 @@ import { analyze, hash } from '../src/analyze.js';
 import { fetchArticle, extractPastedArticleLinks, requestedArticleURL } from '../src/article.js';
 import { huggingFace } from '../src/huggingface.js';
 import { cloudflareAI } from '../src/cloudflare.js';
-import { semanticPosition, ageTransform, orbitalPosition, separatePoints } from '../src/position.js';
+import { semanticPosition, ageTransform, orbitalPosition, orbitalParameters, orbitalPoint, separatePoints } from '../src/position.js';
 const MAP_GENERATION = 2;
 const MAX_CARDS = 10;
 const GA_MEASUREMENT_ID = 'G-RERFC3F88M';
@@ -162,20 +162,39 @@ body{
   height:min(70vw,70vh);
   max-width:70vw;
   max-height:70vh;
-  object-fit:contain;
   transform:translate(-50%,-50%);
   z-index:0;
   pointer-events:none;
   user-select:none;
   -webkit-user-drag:none;
+  border-radius:50%;
+  background:radial-gradient(circle at 32% 28%,#fff 0,#e9e9e9 18%,#9a9a9a 58%,#222 100%);
+  box-shadow:inset -26px -24px 42px rgba(0,0,0,.48),inset 18px 16px 30px rgba(255,255,255,.75),0 18px 45px rgba(0,0,0,.22);
+  transform-style:preserve-3d;
 }
+
+.sphere-logo img{width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 2px 2px rgba(0,0,0,.28))}
 
 #workspace{
   position:fixed;
   inset:0;
   z-index:1;
   touch-action:none;
+  perspective:1100px;
+  perspective-origin:50% 50%;
+  transform-style:preserve-3d;
 }
+
+#workspace::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  background:radial-gradient(circle at 50% 50%,rgba(255,255,255,.7),rgba(255,255,255,0) 52%);
+}
+
+.orbit-layer{position:absolute;inset:0;transform-style:preserve-3d;pointer-events:none}
+.orbit-ring{position:absolute;left:50%;top:50%;border:1px solid rgba(0,0,0,.12);border-radius:50%;transform-style:preserve-3d;pointer-events:none}
 
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 
@@ -204,6 +223,8 @@ body{
   height:0;
   user-select:none;
   -webkit-user-select:none;
+  transform-style:preserve-3d;
+  will-change:left,top,transform;
 }
 
 .dot{
@@ -230,6 +251,7 @@ body{
   background:currentColor;
   transform:translate(-50%,-50%);
   pointer-events:none;
+  box-shadow:0 0 18px currentColor;
 }
 
 .node.dragging{
@@ -294,12 +316,15 @@ body{
 </head>
 
 <body tabindex="0">
-<img class="sphere-logo" src="https://indexmod.press/logo.svg" alt="Indexmod" aria-hidden="true">
+<div class="sphere-logo" aria-hidden="true"><img src="https://indexmod.press/logo.svg" alt="Indexmod"></div>
 <div id="workspace"></div>
 <output id="analysis-status" class="sr-only" aria-live="polite"></output>
 
 <script>
 const ws = document.getElementById("workspace");
+const orbitLayer = document.createElement("div");
+orbitLayer.className = "orbit-layer";
+ws.appendChild(orbitLayer);
 const trailLayer = document.createElementNS("http://www.w3.org/2000/svg","svg");
 trailLayer.classList.add("journey-trails");
 trailLayer.setAttribute("aria-hidden","true");
@@ -317,6 +342,8 @@ const maxCards = ${MAX_CARDS};
 ${semanticPosition.toString()}
 ${ageTransform.toString()}
 ${orbitalPosition.toString()}
+${orbitalParameters.toString()}
+${orbitalPoint.toString()}
 ${separatePoints.toString()}
 ${extractPastedArticleLinks.toString()}
 ${requestedArticleURL.toString()}
@@ -362,14 +389,53 @@ async function analyzeNode(node){
 
 function reflow(){
   const targets = new Map();
+  const orbits = new Map();
   nodes.forEach((node,index) => {
     const profile = node.get().analysis?.result;
     if (!profile) return;
-    const target = orbitalPosition(index,nodes.length,{width:innerWidth,height:innerHeight,hitSize:dotMetrics().hitSize});
-    if (target) targets.set(node,node.prepareTarget(target));
+    const orbit = orbitalParameters(index,nodes.length,{width:innerWidth,height:innerHeight,hitSize:dotMetrics().hitSize});
+    const target = orbitalPoint(orbit,0,{width:innerWidth,height:innerHeight});
+    if (target) {
+      targets.set(node,node.prepareTarget(target));
+      orbits.set(node,orbit);
+    }
   });
   if (!targets.size) return;
-  return animateLayout(targets);
+  return animateLayout(targets).then(()=>{
+    for(const [node,orbit] of orbits) node.setOrbit(orbit);
+    rebuildOrbitRings();
+    startOrbitAnimation();
+  });
+}
+
+let orbitFrame = 0;
+function rebuildOrbitRings(){
+  orbitLayer.children.length=0;
+  nodes.forEach(node=>{
+    const orbit=node.get().orbit;
+    if(!orbit) return;
+    const ring=document.createElement("div");
+    ring.className="orbit-ring";
+    ring.style.width=(orbit.radius*2)+"px";
+    ring.style.height=(orbit.radius*2*Math.cos(orbit.tilt))+"px";
+    ring.style.marginLeft=(-orbit.radius)+"px";
+    ring.style.marginTop=(-orbit.radius*Math.cos(orbit.tilt))+"px";
+    ring.style.transform="rotateX("+(-orbit.tilt*180/Math.PI)+"deg)";
+    orbitLayer.appendChild(ring);
+  });
+}
+
+function startOrbitAnimation(){
+  if(orbitFrame) return;
+  const frame=now=>{
+    orbitFrame=requestAnimationFrame(frame);
+    for(const node of nodes){
+      const orbit=node.get().orbit;
+      if(orbit && !node.isDragging()) node.setOrbitPoint(orbitalPoint(orbit,now,{width:innerWidth,height:innerHeight}));
+    }
+    scheduleLabelLayout();
+  };
+  orbitFrame=requestAnimationFrame(frame);
 }
 
 // All positions remain real throughout the journey: labels, dragging and saves
@@ -601,6 +667,8 @@ function createNode(d){
   let status = d.status || (analysis ? "ready" : "pending");
   let manualOffset = d.manualOffset || { x:0, y:0 };
   let baseTarget = d.baseTarget || null;
+  let orbit = d.orbit || null;
+  let orbitZ = 0;
   let touchedBeforeAnalysis = false;
   let motionRevision = 0;
   const anchor = { x:0, y:0 };
@@ -611,6 +679,8 @@ function createNode(d){
     anchor.y = clamp(position.y*innerHeight,margin,innerHeight-margin);
     el.style.left = anchor.x+"px";
     el.style.top = anchor.y+"px";
+    el.style.transform = "translateZ("+orbitZ+"px)";
+    el.style.zIndex = String(Math.round(1000 + orbitZ));
 
     const color = colorAt(position.x,position.y);
     dot.style.color = color;
@@ -618,6 +688,8 @@ function createNode(d){
 
   function moveTo(clientX,clientY,offsetX,offsetY){
     motionRevision++;
+    orbit = null;
+    orbitZ = 0;
     position.x = clamp((clientX-offsetX)/innerWidth,0.015,0.985);
     position.y = clamp((clientY-offsetY)/innerHeight,0.025,0.975);
     if(baseTarget) manualOffset = {x:position.x-baseTarget.x,y:position.y-baseTarget.y};
@@ -694,6 +766,8 @@ function createNode(d){
     setTravelling:value=>{el.classList.toggle("travelling",value);calculationState.textContent=value?"Placing…":status==="pending"?"Calculating…":status==="error"?"Calculation failed":"";},
     setTitle:value=>{d.title=value;a.textContent=value;},
     setAnalysis:value=>{ analysis = value; dot.title = "Analyzed " + (value.updated || ""); },
+    setOrbit:value=>{ orbit=value; orbitZ=0; render(); },
+    setOrbitPoint:value=>{ if(!value) return; orbitZ=value.z||0; position.x=value.x; position.y=value.y; render(); },
     setStatus,
     anchor,
     render,
@@ -705,6 +779,7 @@ function createNode(d){
       status,
       manualOffset,
       baseTarget,
+      orbit,
       nx:Number(position.x.toFixed(6)),
       ny:Number(position.y.toFixed(6))
     })
@@ -852,10 +927,19 @@ async function load(){
   }
   while (nodes.length > maxCards) nodes.shift().el.remove();
   if ((d.cards||[]).length > maxCards) await save();
+  nodes.forEach((node,index)=>{
+    if(node.get().analysis) node.setOrbit(orbitalParameters(index,nodes.length,{width:innerWidth,height:innerHeight,hitSize:dotMetrics().hitSize}));
+  });
+  rebuildOrbitRings();
+  if (nodes.some(node=>node.get().orbit)) startOrbitAnimation();
 }
 
 window.addEventListener("resize",()=>{
-  separateNodes();
+  nodes.forEach((node,index)=>{
+    if(node.get().orbit) node.setOrbit(orbitalParameters(index,nodes.length,{width:innerWidth,height:innerHeight,hitSize:dotMetrics().hitSize}));
+  });
+  rebuildOrbitRings();
+  if(!nodes.some(node=>node.get().orbit)) separateNodes();
   scheduleLabelLayout();
 });
 
