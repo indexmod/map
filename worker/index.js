@@ -337,6 +337,32 @@ function updatePulse(){
   analysisStatus.textContent = pendingAnalyses ? "Calculating " + pendingAnalyses + " article(s)…" : activeJourneys ? "Placing points…" : "Map ready";
 }
 
+function trackMapEvent(name, data){
+  if(typeof window.gtag !== "function") return;
+  window.gtag("event",name,data);
+}
+
+function trackArticle(node, eventName = "map_article_published"){
+  const data=node.get();
+  trackMapEvent(eventName,{
+    article_url:data.link,
+    article_title:data.title,
+    map_slot:nodes.indexOf(node)+1,
+    active_points:nodes.length
+  });
+}
+
+function trackLoadedArticles(){
+  for(const node of nodes){
+    const link=node.get().link;
+    let alreadySeen=false;
+    try { alreadySeen=sessionStorage.getItem("map-ga:"+link)==="1"; } catch {}
+    if(alreadySeen) continue;
+    try { sessionStorage.setItem("map-ga:"+link,"1"); } catch {}
+    trackArticle(node,"map_article_active");
+  }
+}
+
 async function analyzeNode(node){
   pendingAnalyses++;
   updatePulse();
@@ -595,6 +621,7 @@ async function addArticle(articleURL,insertionPosition){
         scheduleLabelLayout();
         save().catch(error=>{analysisStatus.textContent=error.message;});
       }
+      trackArticle(node);
     });
     await initialSave;
   }catch(error){
@@ -631,6 +658,10 @@ function createNode(d){
   a.href = d.link;
   a.target = "_blank";
   a.textContent = d.title;
+  a.addEventListener("click",()=>trackMapEvent("map_article_opened",{
+    article_url:d.link,
+    article_title:d.title
+  }));
 
   const label = document.createElement("div");
   label.className = "label";
@@ -929,6 +960,7 @@ window.addEventListener("resize",()=>{
 load().then(()=>{
   separateNodes();
   scheduleLabelLayout();
+  trackLoadedArticles();
   const articleURL = requestedArticleURL(location.search);
   if (articleURL) {
     pasteQueue = pasteQueue.then(()=>addArticle(articleURL,cursorPosition()));
