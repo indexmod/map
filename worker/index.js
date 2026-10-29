@@ -3,9 +3,10 @@ import { analyze, hash } from '../src/analyze.js';
 import { fetchArticle, extractPastedArticleLinks, requestedArticleURL } from '../src/article.js';
 import { huggingFace } from '../src/huggingface.js';
 import { cloudflareAI } from '../src/cloudflare.js';
-import { semanticPosition, ageTransform, separatePoints } from '../src/position.js';
+import { semanticPosition, ageTransform, orbitalPosition, separatePoints } from '../src/position.js';
 const MAP_GENERATION = 2;
-const MAX_CARDS = 20;
+const MAX_CARDS = 10;
+const GA_MEASUREMENT_ID = 'G-RERFC3F88M';
 
 export default {
   async fetch(req, env) {
@@ -122,6 +123,7 @@ const html = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Map — Indexmod</title>
+${GA_MEASUREMENT_ID ? `<script async src="https://www.googletagmanager.com/gtag/js?id=${GA_MEASUREMENT_ID}"></script><script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag("js",new Date());gtag("config","${GA_MEASUREMENT_ID}");</script>` : ''}
 
 <style>
 :root{
@@ -314,6 +316,7 @@ const analysisStatus = document.getElementById("analysis-status");
 const maxCards = ${MAX_CARDS};
 ${semanticPosition.toString()}
 ${ageTransform.toString()}
+${orbitalPosition.toString()}
 ${separatePoints.toString()}
 ${extractPastedArticleLinks.toString()}
 ${requestedArticleURL.toString()}
@@ -358,17 +361,13 @@ async function analyzeNode(node){
 }
 
 function reflow(){
-  const years = nodes.map(n => n.get().analysis?.result?.subjectYear).filter(Number.isFinite);
-  const oldestYear = years.length > 1 && Math.min(...years) < Math.max(...years) ? Math.min(...years) : 1900;
-  const newestYear = years.length > 1 && Math.min(...years) < Math.max(...years) ? Math.max(...years) : 2026;
   const targets = new Map();
-  for (const node of nodes) {
+  nodes.forEach((node,index) => {
     const profile = node.get().analysis?.result;
-    if (!profile) continue;
-    const base = semanticPosition(profile.scores);
-    const target = ageTransform(base,profile.subjectYear,{oldestYear,newestYear}).position;
+    if (!profile) return;
+    const target = orbitalPosition(index,nodes.length,{width:innerWidth,height:innerHeight,hitSize:dotMetrics().hitSize});
     if (target) targets.set(node,node.prepareTarget(target));
-  }
+  });
   if (!targets.size) return;
   return animateLayout(targets);
 }
@@ -852,7 +851,7 @@ async function load(){
     nodes.push(n);
   }
   while (nodes.length > maxCards) nodes.shift().el.remove();
-  if ((d.cards||[]).length > 20) await save();
+  if ((d.cards||[]).length > maxCards) await save();
 }
 
 window.addEventListener("resize",()=>{

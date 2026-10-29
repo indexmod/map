@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { parseArticle, canonicalURL, extractPastedArticleLinks, requestedArticleURL } from '../src/article.js';
 import { analyze, runPublished } from '../src/analyze.js';
 import { schema, emptyProfile, validateProfile, evidenceWarnings } from '../src/schema.js';
-import { semanticPosition, ageTransform } from '../src/position.js';
+import { semanticPosition, ageTransform, orbitalPosition } from '../src/position.js';
 import { huggingFace } from '../src/huggingface.js';
 import { cloudflareAI } from '../src/cloudflare.js';
 const raw = '---\nupdated: "2026-09-18"\n---\nA project started in 2007.';
@@ -43,6 +43,13 @@ test('age never collapses a noncentral vector; unknown year is identity', () => 
   assert.equal(semanticPosition(emptyProfile().scores), null);
   assert.equal(semanticPosition({ institutional: 0, underground: 0, commercial: 0, experimental: 0 }), null);
   assert.throws(() => ageTransform(p, 1900, { minScale: 0 }));
+});
+test('orbital positions form distinct rings around the centre', () => {
+  const points = Array.from({ length: 10 }, (_, index) => orbitalPosition(index, 10, { width: 1440, height: 900 }));
+  const radii = points.map(({ x, y }) => Math.hypot((x - .5) * 1440, (y - .5) * 900));
+  assert.equal(new Set(radii.map(radius => radius.toFixed(4))).size, 10);
+  assert.ok(radii.every(radius => radius > 250 && radius < 450));
+  assert.equal(orbitalPosition(10, 10, { width: 1440, height: 900 }), null);
 });
 test('schema and evidence validation', async () => {
   assert.deepEqual(JSON.parse(await readFile(new URL('../schemas/analysis.schema.json', import.meta.url))), schema);

@@ -24,8 +24,8 @@ test('new map generation clears legacy cards once and rejects stale saves', asyn
   }), env);
   assert.equal(saved.status, 200);
   const retained = JSON.parse(store.get('map_state')).cards;
-  assert.equal(retained.length, 20);
-  assert.equal(retained[0].id, 1);
+  assert.equal(retained.length, 10);
+  assert.equal(retained[0].id, 11);
 });
 test('new pasted article without September frontmatter is analyzed through Workers AI', async () => {
   const original = globalThis.fetch;

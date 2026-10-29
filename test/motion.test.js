@@ -2,15 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
-import { semanticPosition, ageTransform, separatePoints } from '../src/position.js';
+import { semanticPosition, ageTransform, orbitalPosition, separatePoints } from '../src/position.js';
 import { extractPastedArticleLinks, requestedArticleURL } from '../src/article.js';
 
 const worker = await readFile(new URL('../worker/index.js', import.meta.url), 'utf8');
 const pageSource = process.env.MAP_CLIENT_HTML_PATH ? await readFile(process.env.MAP_CLIENT_HTML_PATH, 'utf8') : worker;
-const script = pageSource.slice(pageSource.indexOf('<script>') + 8, pageSource.indexOf('</script>'))
-  .replace('${MAX_CARDS}', '20')
+const script = pageSource.slice(pageSource.lastIndexOf('<script>') + 8, pageSource.lastIndexOf('</script>'))
+  .replace('${MAX_CARDS}', '10')
   .replace('${semanticPosition.toString()}', semanticPosition.toString())
   .replace('${ageTransform.toString()}', ageTransform.toString())
+  .replace('${orbitalPosition.toString()}', orbitalPosition.toString())
   .replace('${separatePoints.toString()}', separatePoints.toString())
   .replace('${extractPastedArticleLinks.toString()}', extractPastedArticleLinks.toString())
   .replace('${requestedArticleURL.toString()}', requestedArticleURL.toString());
@@ -86,7 +87,8 @@ test('client blinks while inference waits, then moves without overlap and saves 
     assert.equal(c.run('nodes[1].get().status'), 'ready');
     assert.equal(c.run('trailLayer.children.length'), 0);
     assert.equal(saves.at(-1).cards[1].status, 'ready');
-    assert.ok(Math.hypot((saves.at(-1).cards[1].nx-.5)*width,(saves.at(-1).cards[1].ny-.5)*844)<6);
+    const orbit = c.run(`orbitalPosition(1,2,{width:${width},height:844,hitSize:${width<600?64:52}})`);
+    assert.ok(Math.hypot((saves.at(-1).cards[1].nx-orbit.x)*width,(saves.at(-1).cards[1].ny-orbit.y)*844)<6);
   }
 });
 

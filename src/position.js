@@ -14,6 +14,27 @@ export function ageTransform(position, year, { oldestYear = 1900, newestYear = 2
   return { position: { x: 0.5 + (position.x - 0.5) * scale, y: 0.5 + (position.y - 0.5) * scale }, scale };
 }
 
+// Put every card on a distinct ring around the fixed centre mark. The radii
+// are deliberately based on the viewport rather than semantic coordinates so
+// a new card cannot pull the existing orbit system back into the centre.
+export function orbitalPosition(index, count, { width, height, hitSize = 52, margin = 12, logoRatio = 0.35 } = {}) {
+  if (!Number.isInteger(index) || !Number.isInteger(count) || index < 0 || index >= count || width <= 0 || height <= 0) return null;
+  const centreX = width / 2;
+  const centreY = height / 2;
+  const shortSide = Math.min(width, height);
+  const logoRadius = shortSide * logoRatio;
+  const edgeRadius = shortSide / 2 - hitSize / 2 - margin;
+  const innerRadius = Math.min(logoRadius + hitSize / 2 + 24, edgeRadius);
+  const outerRadius = Math.max(innerRadius, edgeRadius);
+  const fraction = (index + 1) / (count + 1);
+  const radius = innerRadius + (outerRadius - innerRadius) * fraction;
+  const angle = -Math.PI / 2 + index * 2.399963229728653;
+  return {
+    x: Math.max(0.015, Math.min(0.985, (centreX + Math.cos(angle) * radius) / width)),
+    y: Math.max(0.025, Math.min(0.975, (centreY + Math.sin(angle) * radius) / height))
+  };
+}
+
 // Pixel-space projection keeps hit areas apart, including at viewport edges.
 // Lower weights yield less; a dragged point has weight zero.
 export function separatePoints(points, { width, height, margin, distance }) {
