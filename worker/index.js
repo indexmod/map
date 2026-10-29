@@ -850,7 +850,7 @@ function layoutLabels(){
   for(const node of ordered){
     const {width,height} = labelSizes.get(node);
     const {x,y} = node.anchor;
-    const radius = Math.max(size/2+gap+12,hitSize/2+26);
+    const radius = Math.max(size/2+gap+15,hitSize/2+29);
     const ownDot = {left:x-radius,right:x+radius,top:y-radius,bottom:y+radius};
     const dotObstacles = [...dots,ownDot];
     const obstacles = [...dotObstacles,...placedLabels];
