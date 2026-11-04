@@ -393,98 +393,106 @@ function createNode(d){
   const el = document.createElement("div");
   el.className = "node " + (d.status || (d.analysis ? "ready" : "pending"));
 
-  const dot = document.createElement("div");
+  const dot = document.createElement("a");
   dot.className = "dot";
-
-  const a = document.createElement("a");
-  a.className = "title";
-  a.href = d.link;
-  a.target = "_blank";
-  a.textContent = d.title;
-  a.addEventListener("click",()=>trackMapEvent("map_article_opened",{
+  dot.href = d.link;
+  dot.target = "_blank";
+  dot.rel = "noopener noreferrer";
+  dot.title = d.title || d.link;
+  dot.setAttribute("aria-label",d.title || d.link);
+  dot.addEventListener("click",()=>trackMapEvent("map_article_opened",{
     article_url:d.link,
     article_title:d.title
   }));
-
-  const label = document.createElement("div");
-  label.className = "label";
-  label.appendChild(a);
-  const calculationState = document.createElement("span");
-  calculationState.className = "calculation-state";
-  label.appendChild(calculationState);
-  label.style.flexDirection = "column";
-  label.style.alignItems = "flex-start";
-  label.style.gap = "3px";
-
   el.appendChild(dot);
-  el.appendChild(label);
 
   const position = normalizedPosition(d);
   let analysis = d.analysis || null;
   let status = d.status || (analysis ? "ready" : "pending");
-  let manualOffset = d.manualOffset || { x:0, y:0 };
-  let baseTarget = d.baseTarget || null;
-  let orbit = d.orbit || null;
-  let orbitZ = 0;
-  let touchedBeforeAnalysis = false;
-  let motionRevision = 0;
-  const anchor = { x:0, y:0 };
+  const body = {
+    x:position.x*innerWidth,
+    y:position.y*innerHeight,
+    vx:Number.isFinite(d.vx) ? d.vx : 0,
+    vy:Number.isFinite(d.vy) ? d.vy : 0,
+    radius:0,
+    hitRadius:0
+  };
+  if(!body.vx && !body.vy){
+    const angle = Math.random()*Math.PI*2;
+    const speed = 34+Math.random()*28;
+    body.vx = Math.cos(angle)*speed;
+    body.vy = Math.sin(angle)*speed;
+  }
+
+  let drag = false;
+  let dragMoved = false;
+  let offsetX = 0;
+  let offsetY = 0;
+  let previousDrag = null;
+  let suppressClick = false;
+
+  function updateMetrics(){
+    const {size,hitSize} = dotMetrics();
+    body.radius = size/2;
+    body.hitRadius = hitSize/2;
+  }
+
+  function keepInside(){
+    updateMetrics();
+    const margin = 2;
+    const minX = body.radius+margin;
+    const maxX = Math.max(minX,innerWidth-body.radius-margin);
+    const minY = body.radius+margin;
+    const maxY = Math.max(minY,innerHeight-body.radius-margin);
+    if(body.x<minX){ body.x=minX; if(body.vx<0) body.vx=Math.abs(body.vx); }
+    if(body.x>maxX){ body.x=maxX; if(body.vx>0) body.vx=-Math.abs(body.vx); }
+    if(body.y<minY){ body.y=minY; if(body.vy<0) body.vy=Math.abs(body.vy); }
+    if(body.y>maxY){ body.y=maxY; if(body.vy>0) body.vy=-Math.abs(body.vy); }
+  }
 
   function render(){
-    const margin = dotMetrics().hitSize/2+12;
-    anchor.x = clamp(position.x*innerWidth,margin,innerWidth-margin);
-    anchor.y = clamp(position.y*innerHeight,margin,innerHeight-margin);
-    el.style.left = anchor.x+"px";
-    el.style.top = anchor.y+"px";
-    el.style.transform = "translateZ("+orbitZ+"px)";
-    el.style.zIndex = String(Math.round(1000 + orbitZ));
-
-    const color = colorAt(position.x,position.y);
-    dot.style.color = color;
+    keepInside();
+    position.x = clamp(body.x/innerWidth,0.015,0.985);
+    position.y = clamp(body.y/innerHeight,0.025,0.975);
+    el.style.left = body.x+"px";
+    el.style.top = body.y+"px";
+    dot.style.color = colorFor(d.id);
   }
 
   function moveTo(clientX,clientY,offsetX,offsetY){
-    motionRevision++;
-    orbit = null;
-    orbitZ = 0;
-    position.x = clamp((clientX-offsetX)/innerWidth,0.015,0.985);
-    position.y = clamp((clientY-offsetY)/innerHeight,0.025,0.975);
-    if(baseTarget) manualOffset = {x:position.x-baseTarget.x,y:position.y-baseTarget.y};
-    else touchedBeforeAnalysis = true;
-    separateNodes(new Set(nodes.filter(node=>node.el===el)));
-    scheduleLabelLayout();
+    const now = performance.now();
+    const previous = previousDrag || {x:body.x,y:body.y,time:now};
+    body.x = clamp(clientX-offsetX,body.radius+2,Math.max(body.radius+2,innerWidth-body.radius-2));
+    body.y = clamp(clientY-offsetY,body.radius+2,Math.max(body.radius+2,innerHeight-body.radius-2));
+    const seconds = Math.max((now-previous.time)/1000,0.001);
+    body.vx = clamp((body.x-previous.x)/seconds,-220,220);
+    body.vy = clamp((body.y-previous.y)/seconds,-220,220);
+    dragMoved ||= Math.hypot(body.x-previous.x,body.y-previous.y)>4;
+    previousDrag = {x:body.x,y:body.y,time:now};
+    render();
   }
 
-  function prepareTarget(target){
-    if(touchedBeforeAnalysis && !baseTarget){
-      manualOffset = {x:position.x-target.x,y:position.y-target.y};
-      touchedBeforeAnalysis = false;
-    }
-    baseTarget = target;
-    const margin = dotMetrics().hitSize/2+12;
-    return {
-      x:clamp((target.x+manualOffset.x)*innerWidth,margin,innerWidth-margin)/innerWidth,
-      y:clamp((target.y+manualOffset.y)*innerHeight,margin,innerHeight-margin)/innerHeight
-    };
+  function step(seconds){
+    if(drag) return;
+    body.x += body.vx*seconds;
+    body.y += body.vy*seconds;
+    keepInside();
   }
 
   function setStatus(value){
     status=value;
     el.classList.remove("pending","ready","error");
     el.classList.add(value);
-    calculationState.textContent=value==="pending" ? "Calculating…" : value==="error" ? "Calculation failed" : "";
   }
-
-  let drag = false;
-  let offsetX = 0;
-  let offsetY = 0;
 
   dot.addEventListener("pointerdown",e=>{
     if(e.button!==0) return;
     e.preventDefault();
     drag = true;
-    offsetX = e.clientX-anchor.x;
-    offsetY = e.clientY-anchor.y;
+    dragMoved = false;
+    offsetX = e.clientX-body.x;
+    offsetY = e.clientY-body.y;
+    previousDrag = {x:body.x,y:body.y,time:performance.now()};
     el.classList.add("dragging");
     dot.setPointerCapture(e.pointerId);
   });
@@ -498,35 +506,35 @@ function createNode(d){
     if(!drag) return;
     drag = false;
     el.classList.remove("dragging");
+    suppressClick = dragMoved;
     if(dot.hasPointerCapture(e.pointerId)){
       dot.releasePointerCapture(e.pointerId);
     }
-    separateNodes();
-    scheduleLabelLayout();
-    save().catch(error=>{analysisStatus.textContent=error.message;});
+    previousDrag = null;
+    if(dragMoved) save();
   }
 
   dot.addEventListener("pointerup",finishDrag);
   dot.addEventListener("pointercancel",finishDrag);
+  dot.addEventListener("click",e=>{
+    if(suppressClick){
+      e.preventDefault();
+      suppressClick = false;
+    }
+  });
 
-  setStatus(status);
   render();
+  setStatus(status);
 
   return {
     id:d.id,
     el,
-    label,
     position,
-    prepareTarget,
-    isDragging:()=>drag,
-    motionRevision:()=>motionRevision,
-    setTravelling:value=>{el.classList.toggle("travelling",value);calculationState.textContent=value?"Placing…":status==="pending"?"Calculating…":status==="error"?"Calculation failed":"";},
-    setTitle:value=>{d.title=value;a.textContent=value;},
-    setAnalysis:value=>{ analysis = value; dot.title = "Analyzed " + (value.updated || ""); },
-    setOrbit:value=>{ orbit=value; orbitZ=0; render(); },
-    setOrbitPoint:value=>{ if(!value) return; orbitZ=value.z||0; position.x=value.x; position.y=value.y; render(); },
+    body,
+    step,
+    setTitle:value=>{d.title=value;dot.title=value;dot.setAttribute("aria-label",value);},
+    setAnalysis:value=>{ analysis = value; },
     setStatus,
-    anchor,
     render,
     get:()=>({
       id:d.id,
@@ -534,9 +542,6 @@ function createNode(d){
       link:d.link,
       analysis,
       status,
-      manualOffset,
-      baseTarget,
-      orbit,
       nx:Number(position.x.toFixed(6)),
       ny:Number(position.y.toFixed(6))
     })
