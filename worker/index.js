@@ -3,7 +3,6 @@ import { analyze, hash } from '../src/analyze.js';
 import { fetchArticle, extractPastedArticleLinks, requestedArticleURL } from '../src/article.js';
 import { huggingFace } from '../src/huggingface.js';
 import { cloudflareAI } from '../src/cloudflare.js';
-import { semanticPosition, ageTransform, orbitalPosition, orbitalParameters, orbitalPoint, separatePoints } from '../src/position.js';
 const MAP_GENERATION = 2;
 const MAX_CARDS = 10;
 const GA_MEASUREMENT_ID = 'G-RERFC3F88M';
@@ -79,6 +78,12 @@ export default {
         await env.MAP_DB.put("map_state", JSON.stringify(fresh));
         return Response.json(fresh);
       }
+      const existingCards = Array.isArray(state.cards) ? state.cards : [];
+      const cards = existingCards.slice(-MAX_CARDS);
+      if (!Array.isArray(state.cards) || cards.length !== existingCards.length) {
+        state.cards = cards;
+        await env.MAP_DB.put("map_state", JSON.stringify(state));
+      }
       return Response.json(state);
     }
 
@@ -128,11 +133,8 @@ ${GA_MEASUREMENT_ID ? `<script async src="https://www.googletagmanager.com/gtag/
 <style>
 :root{
   color-scheme:light;
-  --dot-size:36px;
-  --hit-size:76px;
-  --label-gap:22px;
-  --label-width:min(42vw,420px);
-  --label-size:16px;
+  --dot-size:40px;
+  --hit-size:64px;
 }
 
 *{
@@ -153,74 +155,40 @@ body{
   overscroll-behavior:none;
 }
 
-/* Логотип в центре — неподвижная система отсчёта всей карты. */
-.sphere-logo{
-  position:fixed;
-  left:50%;
-  top:50%;
-  width:min(38vw,38vh);
-  height:min(38vw,38vh);
-  max-width:38vw;
-  max-height:38vh;
-  transform:translate(-50%,-50%);
-  z-index:0;
-  pointer-events:none;
-  user-select:none;
-  -webkit-user-drag:none;
-  border-radius:50%;
-  background:linear-gradient(145deg,#d0d0d0 0%,#b8b8b8 52%,#858585 100%);
-  border:1px solid #8a8a8a;
-  transform-style:preserve-3d;
-}
-
-.sphere-logo img{width:100%;height:100%;object-fit:contain;filter:none}
-
 #workspace{
   position:fixed;
   inset:0;
-  z-index:1;
+  z-index:0;
   touch-action:none;
-  perspective:1100px;
-  perspective-origin:50% 50%;
-  transform-style:preserve-3d;
 }
-
-.orbit-layer{position:absolute;inset:0;transform-style:preserve-3d;pointer-events:none}
-.orbit-ring{position:absolute;left:50%;top:50%;border:1px solid rgba(0,0,0,.22);border-radius:50%;transform-style:preserve-3d;pointer-events:none}
 
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 
-.node{transform-origin:0 0}
-.journey-trails{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
-.journey-trail{fill:none;stroke:#000;stroke-width:2;stroke-opacity:1}
-.calculation-state{font-size:12px;line-height:1.3;color:#555}
-.title{text-shadow:none}
-.node.dragging .dot::before{animation:none}
+.node.pending .dot::before{opacity:.5}
 .node.error .dot::before{outline:3px solid #ff3b30}
 
 .node{
   position:absolute;
-  display:flex;
-  align-items:center;
+  left:0;
+  top:0;
   width:0;
   height:0;
   user-select:none;
   -webkit-user-select:none;
-  transform-style:preserve-3d;
-  will-change:left,top,transform;
 }
 
 .dot{
   position:absolute;
   left:0;
   top:0;
-  flex:0 0 auto;
   width:var(--hit-size);
   height:var(--hit-size);
   border-radius:50%;
   cursor:grab;
   touch-action:none;
   transform:translate(-50%,-50%);
+  color:inherit;
+  text-decoration:none;
 }
 
 .dot::before{
@@ -234,7 +202,6 @@ body{
   background:currentColor;
   transform:translate(-50%,-50%);
   pointer-events:none;
-  box-shadow:none;
 }
 
 .node.dragging{
@@ -245,53 +212,27 @@ body{
   cursor:grabbing;
 }
 
-.title{
-  min-width:0;
-  color:#000;
-  text-decoration:none;
-  font-size:var(--label-size);
-  line-height:1.45;
-  overflow-wrap:anywhere;
-}
+/* Keep the hit target generous while the visible shape stays a simple flat circle. */
+.node.error .dot::before{outline:3px solid #ff3b30}
 
-.label{
-  position:absolute;
-  display:flex;
-  align-items:center;
-  gap:12px;
-  width:max-content;
-  max-width:var(--label-width);
+/* The article title is exposed through the link's aria-label and tooltip. */
+.title,.label,.calculation-state{display:none}
 
-}
+/* Remove the old 3D layout rules from this client. */
+.journey-trails,.orbit-layer,.orbit-ring{display:none}
 
-.label a{
-  display:block;
-  flex:1;
-  white-space:normal;
+/* Legacy selectors intentionally stay inert so old saved cards render as circles. */
+.node{
+  width:0;
+  height:0;
+  user-select:none;
+  -webkit-user-select:none;
 }
 
 @media (max-width:600px), (pointer:coarse){
   :root{
     --dot-size:48px;
-    --hit-size:92px;
-    --label-gap:24px;
-    --label-size:clamp(17px,4.8vw,20px);
-  }
-
-  .label{
-    align-items:flex-start;
-  }
-
-  .label a{
-    line-height:1.3;
-  }
-
-
-}
-
-@media (max-width:600px){
-  :root{
-    --label-width:min(70vw,280px);
+    --hit-size:64px;
   }
 }
 </style>
