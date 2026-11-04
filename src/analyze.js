@@ -8,7 +8,7 @@ export async function hash(text) {
 export async function analyze({ raw, prompt, mode = 'dry-run', cache, infer, model = 'none', endpoint = 'none', requireSeptember = true }) {
   if (!['dry-run', 'hf'].includes(mode)) throw new Error('Invalid analysis mode');
   const source = parseArticle(raw);
-  if (requireSeptember && !source.eligible) return { status: 'skipped', updated: source.updated, reason: 'frontmatter.updated must be a valid September 2026 date' };
+  if (requireSeptember && !source.eligible) return { status: 'skipped', created: source.created, updated: source.updated, reason: 'frontmatter.updated must be a valid September 2026 date' };
   const provenance = { analyzerVersion, promptHash: await hash(prompt), contentHash: await hash(raw), mode, model, endpoint };
   const cacheKey = `analysis:v1:${await hash(JSON.stringify(provenance))}`;
   const cached = await cache?.get(cacheKey);
@@ -23,7 +23,7 @@ export async function analyze({ raw, prompt, mode = 'dry-run', cache, infer, mod
   }
   const semantic = semanticPosition(result.scores);
   const transformed = ageTransform(semantic, result.subjectYear);
-  return { status: mode === 'dry-run' ? 'dry-run' : 'analyzed', updated: source.updated, ...provenance, cacheKey, cacheHit, result, evidenceWarnings: evidenceWarnings(result, source.article), semanticPosition: semantic, ageScale: transformed.scale, targetPosition: transformed.position };
+  return { status: mode === 'dry-run' ? 'dry-run' : 'analyzed', created: source.created, updated: source.updated, ...provenance, cacheKey, cacheHit, result, evidenceWarnings: evidenceWarnings(result, source.article), semanticPosition: semantic, ageScale: transformed.scale, targetPosition: transformed.position };
 }
 export async function runPublished({ cards, prompt, fetcher = fetch, ...options }) {
   if (!Array.isArray(cards)) throw new Error('Invalid map_state.cards');

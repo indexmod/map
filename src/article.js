@@ -29,13 +29,17 @@ export function parseArticle(raw) {
   if (typeof raw !== 'string') throw new Error('Source raw Markdown is missing');
   const normalized = raw.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
   const match = normalized.match(/^---\n([\s\S]*?)\n---(?:\n|$)/);
-  // Only a top-level scalar updated in the actual frontmatter is accepted.
-  const fields = match ? [...match[1].matchAll(/^updated:[ \t]*(?:"([^"\n]*)"|'([^'\n]*)'|([^#\n]*?))[ \t]*(?:#.*)?$/gm)] : [];
-  const updated = fields.length === 1 ? (fields[0][1] ?? fields[0][2] ?? fields[0][3]).trim() : null;
+  // Only a top-level scalar in the actual frontmatter is accepted.
+  const scalar = key => {
+    const fields = match ? [...match[1].matchAll(new RegExp(`^${key}:[ \\t]*(?:"([^"\\n]*)"|'([^'\\n]*)'|([^#\\n]*?))[ \\t]*(?:#.*)?$`, 'gm'))] : [];
+    return fields.length === 1 ? (fields[0][1] ?? fields[0][2] ?? fields[0][3]).trim() : null;
+  };
+  const created = scalar('created');
+  const updated = scalar('updated');
   const eligible = /^2026-09-(?:0[1-9]|[12]\d|30)$/.test(updated || '');
   let article = normalized.slice(match?.[0].length || 0).replace(/<!--[\s\S]*?-->/g, '').replace(/\{\{page:[^}]+\}\}/g, '');
   article = article.replace(/^.*INDEXMOD ADMIN PROMPT[\s\S]*$/mi, '').replace(/^#{1,6}\s+(?:Citations|References|See also)\s*\n[\s\S]*?(?=^#{1,6}\s|$(?![\s\S]))/gmi, '').replace(/^[*_\s]*Updated\s+\d{4}-\d{2}-\d{2}[*_\s]*$/gmi, '').trim();
-  return { updated, eligible, article };
+  return { created, updated, eligible, article };
 }
 
 export async function fetchArticle(link, fetcher = fetch) {

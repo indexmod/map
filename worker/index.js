@@ -290,6 +290,7 @@ const motionBounds = {
   minSpeed:18,
   maxSpeed:120,
   oldestYear:1900,
+  ageWindowDays:3650,
   freshnessWindowDays:180
 };
 
@@ -377,11 +378,28 @@ function articleSubjectYear(d,analysis){
   return Number.isFinite(value) ? value : null;
 }
 
+function articleCreated(d,analysis){
+  return analysis?.created || d.created || null;
+}
+
 function articleUpdated(d,analysis){
   return analysis?.updated || d.updated || null;
 }
 
-function articleAgeRatio(year,now=Date.now()){
+function parseArticleDate(value){
+  if(typeof value !== "string" || !value.trim()) return null;
+  const timestamp = Date.parse(value.length===10 ? value+"T12:00:00Z" : value);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function articleAgeRatio(d,analysis,now=Date.now()){
+  const created = parseArticleDate(articleCreated(d,analysis));
+  if(created !== null){
+    const ageDays = Math.max(0,(now-created)/86400000);
+    return clamp(ageDays/motionBounds.ageWindowDays,0,1);
+  }
+
+  const year = articleSubjectYear(d,analysis);
   if(!Number.isFinite(year)) return 0;
   const currentYear = new Date(now).getUTCFullYear();
   const range = Math.max(1,currentYear-motionBounds.oldestYear);
@@ -389,15 +407,14 @@ function articleAgeRatio(year,now=Date.now()){
 }
 
 function articleFreshnessRatio(updated,now=Date.now()){
-  if(typeof updated !== "string" || !updated.trim()) return 0;
-  const timestamp = Date.parse(updated.length===10 ? updated+"T12:00:00Z" : updated);
-  if(!Number.isFinite(timestamp)) return 0;
+  const timestamp = parseArticleDate(updated);
+  if(timestamp === null) return 0;
   const ageDays = Math.max(0,(now-timestamp)/86400000);
   return clamp(1-ageDays/motionBounds.freshnessWindowDays,0,1);
 }
 
 function motionSize(d,analysis){
-  const age = articleAgeRatio(articleSubjectYear(d,analysis));
+  const age = articleAgeRatio(d,analysis);
   return motionBounds.minSize + age*(motionBounds.maxSize-motionBounds.minSize);
 }
 
