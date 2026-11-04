@@ -236,46 +236,28 @@ body{
   }
 }
 </style>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='black'/%3E%3Ccircle cx='11' cy='13' r='2' fill='white'/%3E%3Ccircle cx='21' cy='13' r='2' fill='white'/%3E%3Crect x='12' y='20' width='8' height='2' rx='1' fill='white'/%3E%3C/svg%3E">
 </head>
 
 <body tabindex="0">
-<div class="sphere-logo" aria-hidden="true"><img src="https://indexmod.press/logo.svg" alt="Indexmod"></div>
 <div id="workspace"></div>
 <output id="analysis-status" class="sr-only" aria-live="polite"></output>
 
 <script>
 const ws = document.getElementById("workspace");
-const orbitLayer = document.createElement("div");
-orbitLayer.className = "orbit-layer";
-ws.appendChild(orbitLayer);
-const trailLayer = document.createElementNS("http://www.w3.org/2000/svg","svg");
-trailLayer.classList.add("journey-trails");
-trailLayer.setAttribute("aria-hidden","true");
-ws.appendChild(trailLayer);
 let nodes = [];
 let pasteQueue = Promise.resolve();
 let savePromise = Promise.resolve();
 let mapState = {};
 let lastPointer = { x:innerWidth/2, y:innerHeight/2 };
-let pendingAnalyses = 0;
-let activeJourneys = 0;
-let reflowPending = false;
 const analysisStatus = document.getElementById("analysis-status");
 const maxCards = ${MAX_CARDS};
-${semanticPosition.toString()}
-${ageTransform.toString()}
-${orbitalPosition.toString()}
-${orbitalParameters.toString()}
-${orbitalPoint.toString()}
-${separatePoints.toString()}
 ${extractPastedArticleLinks.toString()}
 ${requestedArticleURL.toString()}
 
 window.addEventListener("pointermove",e=>{ lastPointer = {x:e.clientX,y:e.clientY}; },{passive:true});
 
 function updatePulse(){
-  analysisStatus.textContent = pendingAnalyses ? "Calculating " + pendingAnalyses + " article(s)…" : activeJourneys ? "Placing points…" : "Map ready";
+  analysisStatus.textContent = "Map ready";
 }
 
 function trackMapEvent(name, data){
@@ -305,191 +287,22 @@ function trackLoadedArticles(){
 }
 
 async function analyzeNode(node){
-  pendingAnalyses++;
-  updatePulse();
   node.setStatus("pending");
-  try {
-    const response = await fetch("/api/analyze", {
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({link:node.get().link})
-    });
-    const analysis = await response.json();
-    if (!response.ok) throw new Error(analysis.error || "Analysis failed");
-    if (analysis.status === "analyzed") {
-      if (!nodes.includes(node)) return analysis;
-      node.setAnalysis(analysis);
-      reflowPending = true;
-    }
-    if (analysis.status !== "analyzed" && nodes.includes(node)) throw new Error(analysis.reason || "No position returned");
-    return analysis;
-  } catch (error) {
-    if (nodes.includes(node)) node.setStatus("error");
-    throw error;
-  } finally {
-    pendingAnalyses--;
-    if (pendingAnalyses === 0 && reflowPending) {
-      reflowPending = false;
-      await reflow();
-      await save();
-    }
-    updatePulse();
+  const response = await fetch("/api/analyze", {
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({link:node.get().link})
+  });
+  const analysis = await response.json();
+  if (!response.ok) throw new Error(analysis.error || "Analysis failed");
+  if (analysis.status === "analyzed") {
+    if (!nodes.includes(node)) return analysis;
+    node.setAnalysis(analysis);
+    node.setStatus("ready");
+    save().catch(error=>{analysisStatus.textContent=error.message;});
   }
+  return analysis;
 }
-
-function reflow(){
-  const targets = new Map();
-  const orbits = new Map();
-  nodes.forEach((node,index) => {
-    const profile = node.get().analysis?.result;
-    if (!profile) return;
-    const orbit = orbitalParameters(index,nodes.length,{width:innerWidth,height:innerHeight,hitSize:dotMetrics().hitSize});
-    const target = orbitalPoint(orbit,0,{width:innerWidth,height:innerHeight});
-    if (target) {
-      targets.set(node,node.prepareTarget(target));
-      orbits.set(node,orbit);
-    }
-  });
-  if (!targets.size) return;
-  return animateLayout(targets).then(()=>{
-    for(const [node,orbit] of orbits) node.setOrbit(orbit);
-    rebuildOrbitRings();
-    startOrbitAnimation();
-  });
-}
-
-let orbitFrame = 0;
-function rebuildOrbitRings(){
-  orbitLayer.children.length=0;
-  nodes.forEach(node=>{
-    const orbit=node.get().orbit;
-    if(!orbit) return;
-    const ring=document.createElement("div");
-    ring.className="orbit-ring";
-    ring.style.width=(orbit.radius*2)+"px";
-    ring.style.height=(orbit.radius*2*Math.cos(orbit.tilt))+"px";
-    ring.style.marginLeft=(-orbit.radius)+"px";
-    ring.style.marginTop=(-orbit.radius*Math.cos(orbit.tilt))+"px";
-    ring.style.transform="rotateX("+(-orbit.tilt*180/Math.PI)+"deg)";
-    orbitLayer.appendChild(ring);
-  });
-}
-
-function startOrbitAnimation(){
-  if(orbitFrame) return;
-  const frame=now=>{
-    orbitFrame=requestAnimationFrame(frame);
-    for(const node of nodes){
-      const orbit=node.get().orbit;
-      if(orbit && !node.isDragging()) node.setOrbitPoint(orbitalPoint(orbit,now,{width:innerWidth,height:innerHeight}));
-    }
-    scheduleLabelLayout();
-  };
-  orbitFrame=requestAnimationFrame(frame);
-}
-
-// All positions remain real throughout the journey: labels, dragging and saves
-// see the same coordinates. Collision displacement never changes semantic scores.
-let motionFrame = 0;
-let finishMotion = null;
-function separateNodes(protectedNodes = new Set()){
-  const {hitSize} = dotMetrics();
-  const margin = hitSize/2+12;
-  const points = nodes.map(node=>({
-    x:node.position.x*innerWidth,y:node.position.y*innerHeight,
-    weight:node.isDragging() ? 0 : protectedNodes.has(node) ? .08 : 1
-  }));
-  separatePoints(points,{width:innerWidth,height:innerHeight,margin,distance:hitSize+12});
-  points.forEach((point,index)=>{
-    nodes[index].position.x=point.x/innerWidth;
-    nodes[index].position.y=point.y/innerHeight;
-    nodes[index].render();
-  });
-}
-
-function cancelMotion(){
-  cancelAnimationFrame(motionFrame);
-  motionFrame=0;
-  if(finishMotion){const finish=finishMotion;finishMotion=null;finish();}
-}
-
-function animateLayout(targets){
-  cancelMotion();
-  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const starts = new Map(nodes.map(node=>[node,{...node.position}]));
-  const revisions = new Map(nodes.map(node=>[node,node.motionRevision()]));
-  const goals = new Map(nodes.map(node=>[node,targets.get(node)||{...node.position}]));
-  const travellers = new Set([...targets.keys()].filter(node=>{
-    const goal=goals.get(node);
-    return node.get().status==="pending" || Math.hypot((goal.x-node.position.x)*innerWidth,(goal.y-node.position.y)*innerHeight)>1;
-  }));
-  const trails = new Map();
-  if(!reduced) for(const node of travellers){
-    const path=document.createElementNS("http://www.w3.org/2000/svg","polyline");
-    path.classList.add("journey-trail");
-    trailLayer.appendChild(path);
-    trails.set(node,{path,points:[]});
-  }
-  travellers.forEach(node=>node.setTravelling(true));
-  activeJourneys++;
-  updatePulse();
-  return new Promise(resolve=>{
-    finishMotion=()=>{
-      for(const trail of trails.values()) trail.path.remove();
-      travellers.forEach(node=>{
-        node.setTravelling(false);
-        if(node.get().status!=="error") node.setStatus("ready");
-      });
-      activeJourneys--;
-      scheduleLabelLayout();
-      updatePulse();
-      resolve();
-    };
-    let began=null;
-    let previous=null;
-    function frame(now){
-      if(began===null) began=now;
-      const elapsed=now-began;
-      const dt=Math.min(48,previous===null ? 16 : now-previous);
-      previous=now;
-      const progress=reduced ? 1 : Math.min(1,elapsed/4800);
-      // Smooth start and finish; neighbours yield along the entire path.
-      const eased=progress*progress*(3-2*progress);
-      for(const node of nodes){
-        if(node.isDragging() || !goals.has(node) || revisions.get(node)!==node.motionRevision()) continue;
-        const start=starts.get(node),goal=goals.get(node);
-        const desired={x:start.x+(goal.x-start.x)*eased,y:start.y+(goal.y-start.y)*eased};
-        const alpha=reduced ? 1 : 1-Math.exp(-dt/(travellers.has(node)?90:700));
-        node.position.x+=(desired.x-node.position.x)*alpha;
-        node.position.y+=(desired.y-node.position.y)*alpha;
-      }
-      separateNodes(travellers);
-      for(const [node,trail] of trails){
-        if(!nodes.includes(node)){trail.path.remove();continue;}
-        const point={x:node.anchor.x,y:node.anchor.y};
-        const last=trail.points[trail.points.length-1];
-        if(!last || Math.hypot(point.x-last.x,point.y-last.y)>2){
-          trail.points.push(point);
-          trail.path.setAttribute("points",trail.points.map(p=>p.x+","+p.y).join(" "));
-        }
-      }
-      scheduleLabelLayout();
-      if(reduced || elapsed>=5400){
-        motionFrame=0;
-        const finish=finishMotion;finishMotion=null;finish();
-      }else motionFrame=requestAnimationFrame(frame);
-    }
-    motionFrame=requestAnimationFrame(frame);
-  });
-}
-
-const colorAnchors = [
-  { x:0.5, y:0.5, color:[48,48,48] },
-  { x:0,   y:0,   color:[255,59,48] },
-  { x:1,   y:0,   color:[45,112,255] },
-  { x:1,   y:1,   color:[255,149,0] },
-  { x:0,   y:1,   color:[48,209,88] }
-];
 
 function clamp(value,min,max){
   return Math.min(max,Math.max(min,value));
@@ -517,20 +330,12 @@ function normalizedPosition(d){
   };
 }
 
-function colorAt(x,y){
-  let total = 0;
-  const channels = [0,0,0];
+const nodeColors = ["#111827","#ef4444","#2563eb","#f59e0b","#10b981","#8b5cf6","#ec4899"];
 
-  for(const anchor of colorAnchors){
-    const distance = Math.hypot(x-anchor.x,y-anchor.y);
-    const weight = 1/Math.pow(distance+0.065,3.35);
-    total += weight;
-    channels[0] += anchor.color[0]*weight;
-    channels[1] += anchor.color[1]*weight;
-    channels[2] += anchor.color[2]*weight;
-  }
-
-  return "rgb(" + channels.map(value=>Math.round(value/total)).join(",") + ")";
+function colorFor(id){
+  let hash = 0;
+  for(const character of String(id)) hash = (hash * 31 + character.charCodeAt(0)) | 0;
+  return nodeColors[Math.abs(hash) % nodeColors.length];
 }
 
 // =====================
@@ -546,9 +351,7 @@ async function addArticle(articleURL,insertionPosition){
     ws.appendChild(node.el);
     nodes.push(node);
     while(nodes.length>maxCards) nodes.shift().el.remove();
-    separateNodes(new Set([node]));
     updatePulse();
-    scheduleLabelLayout();
     const initialSave = save();
     const titleRequest = fetch("/api/title?url="+encodeURIComponent(articleURL))
       .then(response=>response.ok?response.json():null).catch(()=>null);
@@ -559,7 +362,6 @@ async function addArticle(articleURL,insertionPosition){
     titleRequest.then(meta=>{
       if(meta?.title && nodes.includes(node)){
         node.setTitle(meta.title);
-        scheduleLabelLayout();
         save().catch(error=>{analysisStatus.textContent=error.message;});
       }
       trackArticle(node);
