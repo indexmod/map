@@ -18,6 +18,7 @@ function client(width) {
     className = '';
     events = {};
     href = '';
+    dataset = {};
     offsetWidth = 120;
     offsetHeight = 44;
     classList = {
@@ -38,7 +39,9 @@ function client(width) {
   const ws = new Element();
   const status = new Element();
   const frames = new Map();
+  const timers = new Map();
   let nextFrame = 1;
+  let nextTimer = 1;
   let now = 0;
   const context = vm.createContext({
     innerWidth: width,
@@ -60,6 +63,8 @@ function client(width) {
     getComputedStyle: () => ({ getPropertyValue: key => ({ '--dot-size': width < 600 ? '48' : '40', '--hit-size': '64' })[key] }),
     requestAnimationFrame: fn => { const id = nextFrame++; frames.set(id, fn); return id; },
     cancelAnimationFrame: id => frames.delete(id),
+    setTimeout: fn => { const id = nextTimer++; timers.set(id, fn); return id; },
+    clearTimeout: id => timers.delete(id),
     fetch: async () => ({ ok: true, json: async () => ({ generation: 2, cards: [] }) })
   });
 
@@ -85,13 +90,16 @@ test('flat circles move smoothly, collide elastically and bounce from the viewpo
     nodes.forEach(node => ws.appendChild(node.el));
   `);
 
-  const initial = c.run('nodes.map(node => ({ x:node.body.x, y:node.body.y }))');
+  const initial = c.run('nodes.map(node => ({ x:node.body.x, y:node.body.y, color:node.el.children[0].style.color, label:node.el.children[0].dataset.label }))');
+  assert.equal(initial[0].color, '#000');
+  assert.equal(initial[0].label, 'A');
   for (let time = 0; time <= 800; time += 16) c.frame(time);
-  const final = c.run('nodes.map(node => ({ x:node.body.x, y:node.body.y, vx:node.body.vx, vy:node.body.vy, radius:node.body.radius }))');
+  const final = c.run('nodes.map(node => ({ x:node.body.x, y:node.body.y, vx:node.body.vx, vy:node.body.vy, radius:node.body.radius, color:node.el.children[0].style.color }))');
 
   assert.ok(final[0].x !== initial[0].x, 'circles should move between frames');
   assert.ok(final[0].vx < 0, 'first circle should bounce away after collision');
   assert.ok(final[1].vx > 0, 'second circle should bounce away after collision');
+  assert.notEqual(final[0].color, '#000', 'collision should flash a visible color');
   assert.ok(Math.hypot(final[0].x - final[1].x, final[0].y - final[1].y) >= final[0].radius + final[1].radius - .2);
 
   c.run(`globalThis.edge = createNode({id:'edge', title:'Edge', link:'https://indexmod.press/edge', status:'ready', nx:.5, ny:.2, vx:400, vy:0});
@@ -103,6 +111,7 @@ test('flat circles move smoothly, collide elastically and bounce from the viewpo
 
 test('the served client has no logo, orbit or visible label layer', () => {
   assert.doesNotMatch(worker, /sphere-logo|orbit-layer|orbit-ring|class="label"|journey-trail/);
+  assert.match(worker, /content:attr\(data-label\)/);
   assert.match(worker, /function resolveCircleCollision/);
   assert.match(worker, /const maxCards = \$\{MAX_CARDS\};/);
 });

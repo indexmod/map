@@ -208,12 +208,40 @@ body{
   z-index:10;
 }
 
+.node.hovering{
+  z-index:20;
+}
+
 .node.dragging .dot{
   cursor:grabbing;
 }
 
 /* The article title is exposed through the link's aria-label and tooltip. */
 .title,.label,.calculation-state{display:none}
+
+.dot::after{
+  content:attr(data-label);
+  position:absolute;
+  left:calc(50% + var(--dot-size)/2 + 10px);
+  top:50%;
+  display:none;
+  max-width:min(70vw,420px);
+  padding:4px 7px;
+  color:#000;
+  background:#fff;
+  font:14px/1.25 ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  text-decoration:underline;
+  text-underline-offset:2px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  transform:translateY(-50%);
+  pointer-events:none;
+  z-index:20;
+}
+
+.dot:hover::after,.dot:focus-visible::after{display:block}
+.dot:hover,.dot:focus-visible{z-index:20}
 
 @media (max-width:600px), (pointer:coarse){
   :root{
@@ -319,12 +347,13 @@ function normalizedPosition(d){
   };
 }
 
-const nodeColors = ["#111827","#ef4444","#2563eb","#f59e0b","#10b981","#8b5cf6","#ec4899"];
+const collisionColors = ["#ef4444","#2563eb","#f59e0b","#10b981","#8b5cf6","#ec4899"];
+let collisionColorIndex = 0;
 
-function colorFor(id){
-  let hash = 0;
-  for(const character of String(id)) hash = (hash * 31 + character.charCodeAt(0)) | 0;
-  return nodeColors[Math.abs(hash) % nodeColors.length];
+function nextCollisionColor(){
+  const color = collisionColors[collisionColorIndex % collisionColors.length];
+  collisionColorIndex++;
+  return color;
 }
 
 // =====================
@@ -388,6 +417,7 @@ function createNode(d){
   dot.target = "_blank";
   dot.rel = "noopener noreferrer";
   dot.title = d.title || d.link;
+  dot.dataset.label = d.title || d.link;
   dot.setAttribute("aria-label",d.title || d.link);
   dot.addEventListener("click",()=>trackMapEvent("map_article_opened",{
     article_url:d.link,
@@ -419,6 +449,8 @@ function createNode(d){
   let offsetY = 0;
   let previousDrag = null;
   let suppressClick = false;
+  let currentColor = "#000";
+  let colorTimer = 0;
 
   function updateMetrics(){
     const {size,hitSize} = dotMetrics();
@@ -445,7 +477,17 @@ function createNode(d){
     position.y = clamp(body.y/innerHeight,0.025,0.975);
     el.style.left = body.x+"px";
     el.style.top = body.y+"px";
-    dot.style.color = colorFor(d.id);
+    dot.style.color = currentColor;
+  }
+
+  function flashCollision(color){
+    currentColor = color;
+    dot.style.color = currentColor;
+    clearTimeout(colorTimer);
+    colorTimer = setTimeout(()=>{
+      currentColor = "#000";
+      dot.style.color = currentColor;
+    },220);
   }
 
   function moveTo(clientX,clientY,offsetX,offsetY){
@@ -491,6 +533,9 @@ function createNode(d){
     moveTo(e.clientX,e.clientY,offsetX,offsetY);
   });
 
+  dot.addEventListener("pointerenter",()=>el.classList.add("hovering"));
+  dot.addEventListener("pointerleave",()=>el.classList.remove("hovering"));
+
   function finishDrag(e){
     if(!drag) return;
     drag = false;
@@ -521,7 +566,8 @@ function createNode(d){
     position,
     body,
     step,
-    setTitle:value=>{d.title=value;dot.title=value;dot.setAttribute("aria-label",value);},
+    flashCollision,
+    setTitle:value=>{d.title=value;dot.title=value;dot.dataset.label=value;dot.setAttribute("aria-label",value);},
     setAnalysis:value=>{ analysis = value; },
     setStatus,
     render,
@@ -583,6 +629,9 @@ function resolveCircleCollision(first,second){
     a.vy += relativeVelocity*ny;
     b.vx -= relativeVelocity*nx;
     b.vy -= relativeVelocity*ny;
+    const color = nextCollisionColor();
+    first.flashCollision(color);
+    second.flashCollision(color);
   }
 }
 
