@@ -210,6 +210,7 @@ body{
   background:currentColor;
   transform:translate(-50%,-50%);
   pointer-events:none;
+  transition:width 700ms ease,height 700ms ease;
 }
 
 .node.dragging{
@@ -282,6 +283,15 @@ const analysisStatus = document.getElementById("analysis-status");
 const maxCards = ${MAX_CARDS};
 ${extractPastedArticleLinks.toString()}
 ${requestedArticleURL.toString()}
+
+const motionBounds = {
+  minSize:20,
+  maxSize:68,
+  minSpeed:18,
+  maxSpeed:120,
+  oldestYear:1900,
+  freshnessWindowDays:180
+};
 
 window.addEventListener("pointermove",e=>{ lastPointer = {x:e.clientX,y:e.clientY}; },{passive:true});
 
@@ -360,6 +370,40 @@ function normalizedPosition(d){
     x:clamp(oldX/innerWidth,0.015,0.985),
     y:clamp(oldY/innerHeight,0.025,0.975)
   };
+}
+
+function articleSubjectYear(d,analysis){
+  const value = analysis?.result?.subjectYear ?? d.subjectYear;
+  return Number.isFinite(value) ? value : null;
+}
+
+function articleUpdated(d,analysis){
+  return analysis?.updated || d.updated || null;
+}
+
+function articleAgeRatio(year,now=Date.now()){
+  if(!Number.isFinite(year)) return 0;
+  const currentYear = new Date(now).getUTCFullYear();
+  const range = Math.max(1,currentYear-motionBounds.oldestYear);
+  return clamp((currentYear-year)/range,0,1);
+}
+
+function articleFreshnessRatio(updated,now=Date.now()){
+  if(typeof updated !== "string" || !updated.trim()) return 0;
+  const timestamp = Date.parse(updated.length===10 ? updated+"T12:00:00Z" : updated);
+  if(!Number.isFinite(timestamp)) return 0;
+  const ageDays = Math.max(0,(now-timestamp)/86400000);
+  return clamp(1-ageDays/motionBounds.freshnessWindowDays,0,1);
+}
+
+function motionSize(d,analysis){
+  const age = articleAgeRatio(articleSubjectYear(d,analysis));
+  return motionBounds.minSize + age*(motionBounds.maxSize-motionBounds.minSize);
+}
+
+function motionSpeed(d,analysis){
+  const freshness = articleFreshnessRatio(articleUpdated(d,analysis));
+  return motionBounds.minSpeed + freshness*(motionBounds.maxSpeed-motionBounds.minSpeed);
 }
 
 const collisionColors = ["#ef4444","#2563eb","#f59e0b","#10b981","#8b5cf6","#ec4899"];
@@ -443,6 +487,8 @@ function createNode(d){
   const position = normalizedPosition(d);
   let analysis = d.analysis || null;
   let status = d.status || (analysis ? "ready" : "pending");
+  let dotSize = motionSize(d,analysis);
+  const hasInitialVelocity = Number.isFinite(d.vx) || Number.isFinite(d.vy);
   const body = {
     x:position.x*innerWidth,
     y:position.y*innerHeight,
@@ -469,9 +515,24 @@ function createNode(d){
   let collisionLabelTimer = 0;
 
   function updateMetrics(){
-    const {size,hitSize} = dotMetrics();
-    body.radius = size/2;
+    const {hitSize} = dotMetrics();
+    body.radius = dotSize/2;
     body.hitRadius = hitSize/2;
+  }
+
+  function setVelocityMagnitude(speed){
+    const currentSpeed = Math.hypot(body.vx,body.vy);
+    const angle = currentSpeed > 0 ? Math.atan2(body.vy,body.vx) : Math.random()*Math.PI*2;
+    body.vx = Math.cos(angle)*speed;
+    body.vy = Math.sin(angle)*speed;
+  }
+
+  function applyMotionProfile(adjustVelocity){
+    dotSize = motionSize(d,analysis);
+    if(typeof dot.style.setProperty === "function") dot.style.setProperty("--dot-size",dotSize+"px");
+    else dot.style["--dot-size"] = dotSize+"px";
+    if(adjustVelocity) setVelocityMagnitude(motionSpeed(d,analysis));
+    updateMetrics();
   }
 
   function keepInside(){
@@ -583,6 +644,7 @@ function createNode(d){
     }
   });
 
+  applyMotionProfile(!hasInitialVelocity);
   render();
   setStatus(status);
 
@@ -595,7 +657,7 @@ function createNode(d){
     flashCollision,
     showCollisionLabel,
     setTitle:value=>{d.title=value;dot.title=value;dot.dataset.label=value;dot.setAttribute("aria-label",value);},
-    setAnalysis:value=>{ analysis = value; },
+    setAnalysis:value=>{ analysis = value; applyMotionProfile(true); render(); },
     setStatus,
     render,
     get:()=>({

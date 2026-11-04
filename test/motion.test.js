@@ -119,9 +119,35 @@ test('flat circles move smoothly, collide elastically and bounce from the viewpo
   assert.ok(c.run('globalThis.edge.body.vx') < 0, 'circle should reverse velocity at the right edge');
 });
 
+test('circle size follows article age and speed follows update freshness', () => {
+  const c = client(1000);
+  c.run(`
+    globalThis.oldArticle = createNode({id:'old', title:'Old', link:'https://indexmod.press/old', status:'ready',
+      analysis:{updated:'2026-09-01', result:{subjectYear:1950}}});
+    globalThis.newArticle = createNode({id:'new', title:'New', link:'https://indexmod.press/new', status:'ready',
+      analysis:{updated:'2026-09-01', result:{subjectYear:2026}}});
+    globalThis.freshArticle = createNode({id:'fresh', title:'Fresh', link:'https://indexmod.press/fresh', status:'ready',
+      analysis:{updated:new Date().toISOString().slice(0,10), result:{subjectYear:2026}}});
+    globalThis.unupdatedArticle = createNode({id:'unupdated', title:'Unupdated', link:'https://indexmod.press/unupdated', status:'ready',
+      analysis:{result:{subjectYear:2026}}});
+  `);
+
+  const metrics = c.run(`({
+    oldSize:oldArticle.body.radius*2,
+    newSize:newArticle.body.radius*2,
+    freshSpeed:Math.hypot(freshArticle.body.vx,freshArticle.body.vy),
+    unupdatedSpeed:Math.hypot(unupdatedArticle.body.vx,unupdatedArticle.body.vy)
+  })`);
+  assert.ok(metrics.oldSize > metrics.newSize, 'older articles should have larger circles');
+  assert.ok(metrics.freshSpeed > metrics.unupdatedSpeed, 'recently updated articles should move faster');
+  assert.equal(Math.round(metrics.unupdatedSpeed), 18, 'articles without an update should use the minimum speed');
+});
+
 test('the served client has no logo, orbit or visible label layer', () => {
   assert.doesNotMatch(worker, /sphere-logo|orbit-layer|orbit-ring|class="label"|journey-trail/);
   assert.match(worker, /content:attr\(data-label\)/);
   assert.match(worker, /function resolveCircleCollision/);
   assert.match(worker, /const maxCards = \$\{MAX_CARDS\};/);
+  assert.match(worker, /function motionSize/);
+  assert.match(worker, /function motionSpeed/);
 });
