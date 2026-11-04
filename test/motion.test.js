@@ -2,142 +2,107 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
-import { semanticPosition, ageTransform, orbitalPosition, orbitalParameters, orbitalPoint, separatePoints } from '../src/position.js';
 import { extractPastedArticleLinks, requestedArticleURL } from '../src/article.js';
 
 const worker = await readFile(new URL('../worker/index.js', import.meta.url), 'utf8');
-const pageSource = process.env.MAP_CLIENT_HTML_PATH ? await readFile(process.env.MAP_CLIENT_HTML_PATH, 'utf8') : worker;
-const script = pageSource.slice(pageSource.lastIndexOf('<script>') + 8, pageSource.lastIndexOf('</script>'))
+const script = worker.slice(worker.lastIndexOf('<script>') + 8, worker.lastIndexOf('</script>'))
   .replace('${MAX_CARDS}', '10')
-  .replace('${semanticPosition.toString()}', semanticPosition.toString())
-  .replace('${ageTransform.toString()}', ageTransform.toString())
-  .replace('${orbitalPosition.toString()}', orbitalPosition.toString())
-  .replace('${orbitalParameters.toString()}', orbitalParameters.toString())
-  .replace('${orbitalPoint.toString()}', orbitalPoint.toString())
-  .replace('${separatePoints.toString()}', separatePoints.toString())
   .replace('${extractPastedArticleLinks.toString()}', extractPastedArticleLinks.toString())
   .replace('${requestedArticleURL.toString()}', requestedArticleURL.toString());
 
-// A deterministic DOM/frame harness exercises the actual served client script.
-function client(width, reduced = false) {
+function client(width) {
   class Element {
-    style = {}; children = []; textContent = ''; className = ''; events = {};
-    offsetWidth = 120; offsetHeight = 44;
+    style = {};
+    children = [];
+    textContent = '';
+    className = '';
+    events = {};
+    href = '';
+    offsetWidth = 120;
+    offsetHeight = 44;
     classList = {
       add: (...names) => { this.className = [...new Set([...this.className.split(' '), ...names])].join(' '); },
-      remove: (...names) => { this.className = this.className.split(' ').filter(n => !names.includes(n)).join(' '); },
+      remove: (...names) => { this.className = this.className.split(' ').filter(name => !names.includes(name)).join(' '); },
       toggle: (name, on) => on ? this.classList.add(name) : this.classList.remove(name)
     };
     appendChild(child) { this.children.push(child); child.parent = this; }
-    remove() { if(this.parent) this.parent.children = this.parent.children.filter(c=>c!==this); }
+    remove() { if (this.parent) this.parent.children = this.parent.children.filter(child => child !== this); }
     setAttribute() {}
     addEventListener(name, fn) { this.events[name] = fn; }
     focus() {}
     setPointerCapture() {}
+    releasePointerCapture() {}
     hasPointerCapture() { return false; }
   }
-  const ws = new Element(), status = new Element();
-  const frames = new Map(); let nextFrame = 1;
+
+  const ws = new Element();
+  const status = new Element();
+  const frames = new Map();
+  let nextFrame = 1;
+  let now = 0;
   const context = vm.createContext({
-    innerWidth: width, innerHeight: 844, Element, crypto: { randomUUID: () => 'new' },
-    URL, URLSearchParams, location: { search: '' },
-    document: { documentElement: new Element(), body: new Element(), getElementById: id => id === 'workspace' ? ws : status,
-      createElement: () => new Element(), createElementNS: () => new Element(), addEventListener() {} },
+    innerWidth: width,
+    innerHeight: 844,
+    Element,
+    URL,
+    URLSearchParams,
+    location: { search: '' },
+    crypto: { randomUUID: () => 'new' },
+    performance: { now: () => now },
+    document: {
+      documentElement: new Element(),
+      body: new Element(),
+      getElementById: id => id === 'workspace' ? ws : status,
+      createElement: () => new Element(),
+      addEventListener() {}
+    },
     window: { addEventListener() {} },
-    getComputedStyle: () => ({ getPropertyValue: key => ({ '--dot-size': width < 600 ? '48' : '36', '--hit-size': width < 600 ? '64' : '52', '--label-gap': '24' })[key] }),
-    matchMedia: () => ({ matches: reduced }),
+    getComputedStyle: () => ({ getPropertyValue: key => ({ '--dot-size': width < 600 ? '48' : '40', '--hit-size': '64' })[key] }),
     requestAnimationFrame: fn => { const id = nextFrame++; frames.set(id, fn); return id; },
     cancelAnimationFrame: id => frames.delete(id),
     fetch: async () => ({ ok: true, json: async () => ({ generation: 2, cards: [] }) })
   });
+
   vm.runInContext(script.slice(0, script.indexOf('load().then(')), context);
-  return { context, ws, run: code => vm.runInContext(code, context), frame: time => {
-    const current = [...frames.values()]; frames.clear(); current.forEach(fn => fn(time));
-  } };
+  return {
+    context,
+    ws,
+    run: code => vm.runInContext(code, context),
+    frame: time => {
+      now = time;
+      const current = [...frames.values()];
+      frames.clear();
+      current.forEach(fn => fn(time));
+    }
+  };
 }
 
-test('client shows calculation state, then moves without overlap and saves ready positions', async () => {
-  for (const width of [390, 1440]) {
-    const c = client(width);
-    let finishInference;
-    const inference = new Promise(resolve => { finishInference = resolve; });
-    const saves = [];
-    c.context.fetch = async (url, options) => {
-      if (url === '/api/analyze') { await inference; return { ok: true, json: async () => ({ status: 'analyzed', result: { scores: { institutional: .25, underground: .25, commercial: .25, experimental: .25 }, subjectYear: null } }) }; }
-      saves.push(JSON.parse(options.body)); return { ok: true };
-    };
-    c.run(`nodes.push(createNode({id:'old',title:'Old',link:'https://indexmod.press/old',status:'ready',nx:.5,ny:.5}));
-      nodes.push(createNode({id:'new',title:'New',link:'https://indexmod.press/new',nx:.15,ny:.2}));
-      for(const node of nodes) ws.appendChild(node.el);
-      globalThis.analysisPromise=analyzeNode(nodes[1]);`);
-    assert.equal(c.run('nodes[1].get().status'), 'pending');
-    assert.equal(c.run('nodes[1].label.children[1].textContent'), 'Calculating…');
-    assert.doesNotMatch(worker, /animation:calculationBlink|blur\(/);
-    finishInference();
-    for(let i=0;i<12;i++) await Promise.resolve();
-    assert.equal(c.run('activeJourneys'), 1);
-    let previous, maxStep = 0;
-    for(let time=0;time<=5600;time+=16){
-      c.frame(time);
-      const points=c.run('nodes.map(n=>({...n.anchor}))');
-      assert.ok(Math.hypot(points[0].x-points[1].x,points[0].y-points[1].y) >= (width<600?76:64)-.1);
-      if(previous) maxStep=Math.max(maxStep,Math.hypot(points[1].x-previous.x,points[1].y-previous.y));
-      previous=points[1];
-    }
-    await c.context.analysisPromise;
-    assert.ok(maxStep<10, `frame movement was ${maxStep}`);
-    assert.equal(c.run('nodes[1].get().status'), 'ready');
-    assert.equal(c.run('trailLayer.children.length'), 0);
-    assert.equal(saves.at(-1).cards[1].status, 'ready');
-    const orbit = c.run(`orbitalPosition(1,2,{width:${width},height:844,hitSize:${width<600?64:52}})`);
-    assert.ok(Math.hypot((saves.at(-1).cards[1].nx-orbit.x)*width,(saves.at(-1).cards[1].ny-orbit.y)*844)<6);
-  }
+test('flat circles move smoothly, collide elastically and bounce from the viewport edge', () => {
+  const c = client(1000);
+  c.run(`
+    nodes.push(createNode({id:'a', title:'A', link:'https://indexmod.press/a', status:'ready', nx:.45, ny:.5, vx:100, vy:0}));
+    nodes.push(createNode({id:'b', title:'B', link:'https://indexmod.press/b', status:'ready', nx:.55, ny:.5, vx:-100, vy:0}));
+    nodes.forEach(node => ws.appendChild(node.el));
+  `);
+
+  const initial = c.run('nodes.map(node => ({ x:node.body.x, y:node.body.y }))');
+  for (let time = 0; time <= 800; time += 16) c.frame(time);
+  const final = c.run('nodes.map(node => ({ x:node.body.x, y:node.body.y, vx:node.body.vx, vy:node.body.vy, radius:node.body.radius }))');
+
+  assert.ok(final[0].x !== initial[0].x, 'circles should move between frames');
+  assert.ok(final[0].vx < 0, 'first circle should bounce away after collision');
+  assert.ok(final[1].vx > 0, 'second circle should bounce away after collision');
+  assert.ok(Math.hypot(final[0].x - final[1].x, final[0].y - final[1].y) >= final[0].radius + final[1].radius - .2);
+
+  c.run(`globalThis.edge = createNode({id:'edge', title:'Edge', link:'https://indexmod.press/edge', status:'ready', nx:.5, ny:.2, vx:400, vy:0});
+    nodes.push(globalThis.edge); ws.appendChild(globalThis.edge.el);`);
+  for (let time = 816; time <= 2400; time += 16) c.frame(time);
+  assert.ok(c.run('globalThis.edge.body.x') <= 980.1);
+  assert.ok(c.run('globalThis.edge.body.vx') < 0, 'circle should reverse velocity at the right edge');
 });
 
-test('reduced motion settles in one frame; dragging during travel preserves the manual position', async () => {
-  for(const reduced of [true, false]){
-    const c=client(1000,reduced);
-    c.run(`nodes.push(createNode({id:'a',title:'A',link:'https://indexmod.press/a',status:'ready',nx:.2,ny:.2}));
-      globalThis.journey=animateLayout(new Map([[nodes[0],nodes[0].prepareTarget({x:.7,y:.6})]]));`);
-    c.frame(0);
-    if(!reduced){
-      c.frame(1000);
-      c.run(`const dot=nodes[0].el.children[0];dot.events.pointerdown({button:0,preventDefault(){},clientX:nodes[0].anchor.x,clientY:nodes[0].anchor.y,pointerId:1});
-        dot.events.pointermove({clientX:250,clientY:300});dot.events.pointerup({pointerId:1});`);
-      for(let time=1016;time<5600;time+=16)c.frame(time);
-      assert.equal(c.run('nodes[0].anchor.x'),250);
-      assert.equal(c.run('nodes[0].anchor.y'),300);
-    }else assert.ok(Math.abs(c.run('nodes[0].anchor.x')-700)<.1);
-    await c.context.journey;
-    assert.equal(c.run('activeJourneys'),0);
-  }
-});
-
-
-test('labels stay clear of every circle before, during and after travel', async () => {
-  for(const width of [390,1440]){
-    const c=client(width);
-    c.run(`for(let i=0;i<20;i++){
-      const n=createNode({id:String(i),title:'Article '+i,link:'https://indexmod.press/article-'+i,status:'ready',nx:.4+(i%5)*.02,ny:.4+Math.floor(i/5)*.02});
-      nodes.push(n);ws.appendChild(n.el);
-    }
-    separateNodes();layoutLabels();
-    globalThis.journey=animateLayout(new Map([[nodes[19],nodes[19].prepareTarget({x:.5,y:.5})]]));`);
-    for(const time of [0,2700,5500,5600]){
-      c.frame(time);
-      c.run('layoutLabels()');
-      const geometry=c.run(`nodes.map(n=>({dot:{x:n.anchor.x,y:n.anchor.y},label:{x:n.anchor.x+parseFloat(n.label.style.left),y:n.anchor.y+parseFloat(n.label.style.top),width:n.label.offsetWidth,height:n.label.offsetHeight},hidden:n.label.style.visibility==='hidden'}))`);
-      for(const entry of geometry){
-        assert.ok(!entry.hidden, 'a label should be visible');
-        for(const other of geometry){
-          const r=width<600?32:26;
-          const rect=entry.label;
-          const dx=Math.max(0,Math.min(rect.x+rect.width,other.dot.x+r)-Math.max(rect.x,other.dot.x-r));
-          const dy=Math.max(0,Math.min(rect.y+rect.height,other.dot.y+r)-Math.max(rect.y,other.dot.y-r));
-          assert.equal(dx*dy,0);
-        }
-      }
-    }
-    await c.context.journey;
-  }
+test('the served client has no logo, orbit or visible label layer', () => {
+  assert.doesNotMatch(worker, /sphere-logo|orbit-layer|orbit-ring|class="label"|journey-trail/);
+  assert.match(worker, /function resolveCircleCollision/);
+  assert.match(worker, /const maxCards = \$\{MAX_CARDS\};/);
 });

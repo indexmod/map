@@ -212,22 +212,8 @@ body{
   cursor:grabbing;
 }
 
-/* Keep the hit target generous while the visible shape stays a simple flat circle. */
-.node.error .dot::before{outline:3px solid #ff3b30}
-
 /* The article title is exposed through the link's aria-label and tooltip. */
 .title,.label,.calculation-state{display:none}
-
-/* Remove the old 3D layout rules from this client. */
-.journey-trails,.orbit-layer,.orbit-ring{display:none}
-
-/* Legacy selectors intentionally stay inert so old saved cards render as circles. */
-.node{
-  width:0;
-  height:0;
-  user-select:none;
-  -webkit-user-select:none;
-}
 
 @media (max-width:600px), (pointer:coarse){
   :root{
@@ -300,6 +286,9 @@ async function analyzeNode(node){
     node.setAnalysis(analysis);
     node.setStatus("ready");
     save().catch(error=>{analysisStatus.textContent=error.message;});
+  }
+  if (analysis.status !== "analyzed" && nodes.includes(node)) {
+    throw new Error(analysis.reason || "Analysis failed");
   }
   return analysis;
 }
@@ -552,8 +541,7 @@ function dotMetrics(){
   const style = getComputedStyle(document.documentElement);
   return {
     size:parseFloat(style.getPropertyValue("--dot-size")),
-    hitSize:parseFloat(style.getPropertyValue("--hit-size")),
-    gap:parseFloat(style.getPropertyValue("--label-gap"))
+    hitSize:parseFloat(style.getPropertyValue("--hit-size"))
   };
 }
 
@@ -565,99 +553,55 @@ function cursorPosition(){
   };
 }
 
-function overlapArea(a,b){
-  const width = Math.max(0,Math.min(a.right,b.right)-Math.max(a.left,b.left));
-  const height = Math.max(0,Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top));
-  return width*height;
-}
+function resolveCircleCollision(first,second){
+  const a = first.body;
+  const b = second.body;
+  let dx = b.x-a.x;
+  let dy = b.y-a.y;
+  let distance = Math.hypot(dx,dy);
+  const minimum = a.radius+b.radius;
+  if(distance>=minimum) return;
 
-let labelLayoutFrame = 0;
+  if(!distance){
+    const angle = (first.id.length+second.id.length)%360*Math.PI/180;
+    dx = Math.cos(angle);
+    dy = Math.sin(angle);
+    distance = 1;
+  }
 
-function scheduleLabelLayout(){
-  cancelAnimationFrame(labelLayoutFrame);
-  labelLayoutFrame = requestAnimationFrame(layoutLabels);
-}
+  const nx = dx/distance;
+  const ny = dy/distance;
+  const correction = (minimum-distance+0.1)/2;
+  a.x -= nx*correction;
+  a.y -= ny*correction;
+  b.x += nx*correction;
+  b.y += ny*correction;
 
-function layoutLabels(){
-  const {size,hitSize,gap} = dotMetrics();
-  const margin = 12;
-  const separation = 18;
-  const placedLabels = [];
-  const dots = nodes.map(node=>({
-    left:node.anchor.x-hitSize/2-6,
-    right:node.anchor.x+hitSize/2+6,
-    top:node.anchor.y-hitSize/2-6,
-    bottom:node.anchor.y+hitSize/2+6
-  }));
-  const ordered = [...nodes].sort((a,b)=>a.position.y-b.position.y || a.position.x-b.position.x);
-  const labelSizes = new Map(nodes.map(node=>[node,{
-    width:node.label.offsetWidth,
-    height:node.label.offsetHeight
-  }]));
-
-  for(const node of ordered){
-    const {width,height} = labelSizes.get(node);
-    const {x,y} = node.anchor;
-    // The title starts three pixels beyond the visible circle edge, not from
-    // the centre or from the larger invisible pointer hit area.
-    const radius = size/2 + 3;
-    const ownDot = {left:x-radius,right:x+radius,top:y-radius,bottom:y+radius};
-    const dotObstacles = [...dots,ownDot];
-    const obstacles = [...dotObstacles,...placedLabels];
-    const xs = [x+radius,x-radius-width,margin,innerWidth-margin-width];
-    const ys = [y-height/2,y+radius,y-radius-height,margin,innerHeight-margin-height];
-    for(const obstacle of obstacles){
-      xs.push(obstacle.left-width,obstacle.right);
-      ys.push(obstacle.top-height,obstacle.bottom);
-    }
-    const positions = (values,min,max,center,length) => [...new Set(values.map(value=>clamp(value,min,Math.max(min,max))))]
-      .sort((a,b)=>Math.abs(a+length/2-center)-Math.abs(b+length/2-center))
-      .slice(0,24);
-    const xPositions = positions(xs,margin,innerWidth-margin-width,x,width);
-    const yPositions = positions(ys,margin,innerHeight-margin-height,y,height);
-    let bestRect;
-    let bestScore = Infinity;
-
-    candidateSearch: for(const left of xPositions){
-      for(const top of yPositions){
-        const rect = {left,top,right:left+width,bottom:top+height};
-        if (dotObstacles.some(obstacle=>overlapArea(rect,obstacle)>0)) continue;
-        const overlap = obstacles.reduce((sum,obstacle)=>sum+overlapArea(rect,obstacle),0);
-        const distance = Math.hypot(clamp(x,rect.left,rect.right)-x,clamp(y,rect.top,rect.bottom)-y);
-        const alignment = Math.abs(top+height/2-y)*0.1+(left<x ? 0.5 : 0);
-        const score = overlap*10000+distance+alignment;
-        if(score<bestScore){
-          bestScore=score;
-          bestRect=rect;
-        }
-        if(overlap===0) break candidateSearch;
-      }
-    }
-
-    // Never fall back to a rectangle over a point. Search the full viewport
-    // when crowded local candidates have no safe position.
-    if(!bestRect){
-      for(let top=margin;top<=innerHeight-margin-height;top+=16){
-        for(let left=margin;left<=innerWidth-margin-width;left+=16){
-          const rect={left,top,right:left+width,bottom:top+height};
-          if(dotObstacles.some(obstacle=>overlapArea(rect,obstacle)>0)) continue;
-          const score=placedLabels.reduce((sum,obstacle)=>sum+overlapArea(rect,obstacle),0)*10000+Math.hypot(left-x,top-y);
-          if(score<bestScore){bestScore=score;bestRect=rect;}
-        }
-      }
-    }
-    if(!bestRect){node.label.style.visibility="hidden";continue;}
-    node.label.style.visibility="visible";
-    node.label.style.left = (bestRect.left-x)+"px";
-    node.label.style.top = (bestRect.top-y)+"px";
-    placedLabels.push({
-      left:bestRect.left-separation,
-      right:bestRect.right+separation,
-      top:bestRect.top-separation,
-      bottom:bestRect.bottom+separation
-    });
+  const relativeVelocity = (b.vx-a.vx)*nx+(b.vy-a.vy)*ny;
+  if(relativeVelocity<0){
+    a.vx += relativeVelocity*nx;
+    a.vy += relativeVelocity*ny;
+    b.vx -= relativeVelocity*nx;
+    b.vy -= relativeVelocity*ny;
   }
 }
+
+let lastFrame = performance.now();
+
+function physicsFrame(now){
+  const seconds = Math.min(Math.max((now-lastFrame)/1000,0),0.035);
+  lastFrame = now;
+  for(const node of nodes) node.step(seconds);
+  for(let first=0;first<nodes.length;first++){
+    for(let second=first+1;second<nodes.length;second++){
+      resolveCircleCollision(nodes[first],nodes[second]);
+    }
+  }
+  for(const node of nodes) node.render();
+  requestAnimationFrame(physicsFrame);
+}
+
+requestAnimationFrame(physicsFrame);
 
 // =====================
 // SAVE / LOAD
@@ -691,25 +635,13 @@ async function load(){
   }
   while (nodes.length > maxCards) nodes.shift().el.remove();
   if ((d.cards||[]).length > maxCards) await save();
-  nodes.forEach((node,index)=>{
-    if(node.get().analysis) node.setOrbit(orbitalParameters(index,nodes.length,{width:innerWidth,height:innerHeight,hitSize:dotMetrics().hitSize}));
-  });
-  rebuildOrbitRings();
-  if (nodes.some(node=>node.get().orbit)) startOrbitAnimation();
 }
 
 window.addEventListener("resize",()=>{
-  nodes.forEach((node,index)=>{
-    if(node.get().orbit) node.setOrbit(orbitalParameters(index,nodes.length,{width:innerWidth,height:innerHeight,hitSize:dotMetrics().hitSize}));
-  });
-  rebuildOrbitRings();
-  if(!nodes.some(node=>node.get().orbit)) separateNodes();
-  scheduleLabelLayout();
+  for(const node of nodes) node.render();
 });
 
 load().then(()=>{
-  separateNodes();
-  scheduleLabelLayout();
   trackLoadedArticles();
   const articleURL = requestedArticleURL(location.search);
   if (articleURL) {

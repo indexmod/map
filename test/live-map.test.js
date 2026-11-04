@@ -26,6 +26,14 @@ test('new map generation clears legacy cards once and rejects stale saves', asyn
   const retained = JSON.parse(store.get('map_state')).cards;
   assert.equal(retained.length, 10);
   assert.equal(retained[0].id, 11);
+
+  const olderState = new Map([['map_state', JSON.stringify({ generation: 2, cards: Array.from({ length: 12 }, (_, id) => ({ id })) })]]);
+  const trimmed = await (await worker.fetch(new Request('https://map.indexmod.press/api/load'), {
+    MAP_DB: { get: async key => olderState.get(key), put: async (key, value) => olderState.set(key, value) }
+  })).json();
+  assert.equal(trimmed.cards.length, 10);
+  assert.equal(trimmed.cards[0].id, 2);
+  assert.equal(JSON.parse(olderState.get('map_state')).cards.length, 10);
 });
 test('new pasted article without September frontmatter is analyzed through Workers AI', async () => {
   const original = globalThis.fetch;
@@ -104,6 +112,9 @@ test('live map editor can analyze and cache a dated article while saved state st
     const page = await worker.fetch(new Request('https://map.indexmod.press/'), env);
     const html = await page.text();
     assert.doesNotMatch(html, /Retry analysis|mapAnalyzerToken|class=\"del\"/);
+    assert.doesNotMatch(html, /sphere-logo|orbit-layer|orbit-ring|class=\"label\"|journey-trail/);
+    assert.match(html, /const maxCards = 10;/);
+    assert.match(html, /function resolveCircleCollision/);
     const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
     assert.ok(script);
     assert.doesNotThrow(() => new Function(script));
