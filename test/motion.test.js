@@ -78,6 +78,11 @@ function client(width) {
       const current = [...frames.values()];
       frames.clear();
       current.forEach(fn => fn(time));
+    },
+    flushTimers: () => {
+      const current = [...timers.values()];
+      timers.clear();
+      current.forEach(fn => fn());
     }
   };
 }
@@ -94,13 +99,18 @@ test('flat circles move smoothly, collide elastically and bounce from the viewpo
   assert.equal(initial[0].color, '#000');
   assert.equal(initial[0].label, 'A');
   for (let time = 0; time <= 800; time += 16) c.frame(time);
-  const final = c.run('nodes.map(node => ({ x:node.body.x, y:node.body.y, vx:node.body.vx, vy:node.body.vy, radius:node.body.radius, color:node.el.children[0].style.color }))');
+  const final = c.run('nodes.map(node => ({ x:node.body.x, y:node.body.y, vx:node.body.vx, vy:node.body.vy, radius:node.body.radius, color:node.el.children[0].style.color, labelVisible:node.el.className.includes("collision-visible") }))');
 
   assert.ok(final[0].x !== initial[0].x, 'circles should move between frames');
   assert.ok(final[0].vx < 0, 'first circle should bounce away after collision');
   assert.ok(final[1].vx > 0, 'second circle should bounce away after collision');
   assert.notEqual(final[0].color, '#000', 'collision should flash a visible color');
+  assert.equal(final[0].labelVisible, true, 'first collision link should be visible');
+  assert.equal(final[1].labelVisible, true, 'second collision link should be visible');
   assert.ok(Math.hypot(final[0].x - final[1].x, final[0].y - final[1].y) >= final[0].radius + final[1].radius - .2);
+  c.flushTimers();
+  assert.doesNotMatch(c.run('nodes[0].el.className'), /collision-visible/);
+  assert.doesNotMatch(c.run('nodes[1].el.className'), /collision-visible/);
 
   c.run(`globalThis.edge = createNode({id:'edge', title:'Edge', link:'https://indexmod.press/edge', status:'ready', nx:.5, ny:.2, vx:400, vy:0});
     nodes.push(globalThis.edge); ws.appendChild(globalThis.edge.el);`);

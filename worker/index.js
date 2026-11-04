@@ -224,7 +224,9 @@ body{
   position:absolute;
   left:calc(50% + var(--dot-size)/2 + 10px);
   top:50%;
-  display:none;
+  display:block;
+  opacity:0;
+  visibility:hidden;
   max-width:min(70vw,420px);
   padding:4px 7px;
   color:#000;
@@ -238,9 +240,14 @@ body{
   transform:translateY(-50%);
   pointer-events:none;
   z-index:20;
+  transition:opacity 320ms ease,visibility 0s linear 320ms;
 }
 
-.dot:hover::after,.dot:focus-visible::after{display:block}
+.dot:hover::after,.dot:focus-visible::after,.dot.collision-visible::after{
+  opacity:1;
+  visibility:visible;
+  transition-delay:0s;
+}
 .dot:hover,.dot:focus-visible{z-index:20}
 
 @media (max-width:600px), (pointer:coarse){
@@ -451,6 +458,7 @@ function createNode(d){
   let suppressClick = false;
   let currentColor = "#000";
   let colorTimer = 0;
+  let collisionLabelTimer = 0;
 
   function updateMetrics(){
     const {size,hitSize} = dotMetrics();
@@ -488,6 +496,16 @@ function createNode(d){
       currentColor = "#000";
       dot.style.color = currentColor;
     },220);
+  }
+
+  function showCollisionLabel(){
+    el.classList.add("collision-visible");
+    dot.classList.add("collision-visible");
+    clearTimeout(collisionLabelTimer);
+    collisionLabelTimer = setTimeout(()=>{
+      el.classList.remove("collision-visible");
+      dot.classList.remove("collision-visible");
+    },3600);
   }
 
   function moveTo(clientX,clientY,offsetX,offsetY){
@@ -567,6 +585,7 @@ function createNode(d){
     body,
     step,
     flashCollision,
+    showCollisionLabel,
     setTitle:value=>{d.title=value;dot.title=value;dot.dataset.label=value;dot.setAttribute("aria-label",value);},
     setAnalysis:value=>{ analysis = value; },
     setStatus,
@@ -632,6 +651,8 @@ function resolveCircleCollision(first,second){
     const color = nextCollisionColor();
     first.flashCollision(color);
     second.flashCollision(color);
+    first.showCollisionLabel();
+    second.showCollisionLabel();
   }
 }
 
