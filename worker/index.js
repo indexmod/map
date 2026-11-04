@@ -6,10 +6,17 @@ import { cloudflareAI } from '../src/cloudflare.js';
 const MAP_GENERATION = 2;
 const MAX_CARDS = 10;
 const GA_MEASUREMENT_ID = 'G-RERFC3F88M';
+const favicon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#fff"/><circle cx="14" cy="18" r="7" fill="#000"/><circle cx="42" cy="11" r="5" fill="#000"/><circle cx="53" cy="28" r="8" fill="#000"/><circle cx="22" cy="43" r="6" fill="#000"/><circle cx="46" cy="47" r="7" fill="#000"/><circle cx="32" cy="59" r="4" fill="#000"/></svg>`;
 
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
+
+    if (url.pathname === "/favicon.svg") {
+      return new Response(favicon, {
+        headers: { "Content-Type": "image/svg+xml; charset=utf-8", "Cache-Control": "public, max-age=86400" }
+      });
+    }
 
     // =====================
     // UI
@@ -128,6 +135,7 @@ const html = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Map — Indexmod</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 ${GA_MEASUREMENT_ID ? `<script async src="https://www.googletagmanager.com/gtag/js?id=${GA_MEASUREMENT_ID}"></script><script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag("js",new Date());gtag("config","${GA_MEASUREMENT_ID}");</script>` : ''}
 
 <style>
