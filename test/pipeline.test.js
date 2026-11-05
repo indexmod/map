@@ -10,6 +10,7 @@ import { cloudflareAI } from '../src/cloudflare.js';
 const raw = '---\nupdated: "2026-09-18"\n---\nA project started in 2007.';
 test('only actual frontmatter updated, valid September date', () => {
   assert.equal(parseArticle(raw).eligible, true);
+  assert.deepEqual(parseArticle('---\ncreated: "2012-04-03"\nupdated: "2026-09-18"\n---\ntext').created, '2012-04-03');
   for (const input of ['update: 2026-09-18', 'created: 2026-09-18', 'updated: 2026-08-18', 'updated: 2026-09-31', 'updated: 2026-09-18\nupdated: 2026-09-19', '  updated: 2026-09-18']) assert.equal(parseArticle(`---\n${input}\n---\ntext`).eligible, false);
   assert.equal(parseArticle('Updated 2026-09-18').eligible, false);
 });

@@ -123,9 +123,9 @@ test('circle size follows article age and speed follows update freshness', () =>
   const c = client(1000);
   c.run(`
     globalThis.oldArticle = createNode({id:'old', title:'Old', link:'https://indexmod.press/old', status:'ready',
-      analysis:{updated:'2026-09-01', result:{subjectYear:1950}}});
+      analysis:{created:'2016-01-01', updated:'2026-09-01', result:{subjectYear:2026}}});
     globalThis.newArticle = createNode({id:'new', title:'New', link:'https://indexmod.press/new', status:'ready',
-      analysis:{updated:'2026-09-01', result:{subjectYear:2026}}});
+      analysis:{created:'2026-10-01', updated:'2026-09-01', result:{subjectYear:1950}}});
     globalThis.freshArticle = createNode({id:'fresh', title:'Fresh', link:'https://indexmod.press/fresh', status:'ready',
       analysis:{updated:new Date().toISOString().slice(0,10), result:{subjectYear:2026}}});
     globalThis.unupdatedArticle = createNode({id:'unupdated', title:'Unupdated', link:'https://indexmod.press/unupdated', status:'ready',
